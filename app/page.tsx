@@ -4,8 +4,10 @@ import {
   ArrowRight,
   CaretDown,
   CheckCircle,
+  DownloadSimple,
   FileImage,
   FileText,
+  FileZip,
   ImageSquare,
   MagnifyingGlass,
   MusicNotes,
@@ -25,7 +27,11 @@ import {
 import {
   ApiClientError,
   createConversionJob,
+  createArchive,
+  getArchive,
+  getConversionJob,
   requestUploadTicket,
+  resolveApiUrl,
   uploadToObjectStorage,
 } from "@/lib/api";
 
@@ -36,14 +42,28 @@ type UploadItem = {
   objectKey?: string;
   jobId?: string;
   progress: number;
-  state: "idle" | "uploading" | "queued" | "error";
+  state: "idle" | "uploading" | "queued" | "processing" | "completed" | "error";
   error?: string;
+  downloadUrl?: string;
 };
 
-type ConversionStatus = "idle" | "uploading" | "queued" | "error";
+type ConversionStatus = "idle" | "uploading" | "converting" | "completed" | "error";
 
-const sourceFormats = ["自动识别", "JPG", "PNG", "WebP", "AVIF", "HEIC", "SVG"];
+const sourceFormats = ["自动识别", "JPG", "PNG", "WebP", "AVIF", "HEIC", "SVG", "GIF", "TIFF"];
 const targetFormats = ["WebP", "JPG", "PNG", "AVIF", "GIF", "TIFF"];
+const supportedImageExtensions = /\.(jpe?g|png|webp|avif|heic|heif|svg|gif|tiff?)$/i;
+const supportedImageMimeTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/avif",
+  "image/heic",
+  "image/heif",
+  "image/svg+xml",
+  "image/gif",
+  "image/tiff",
+]);
+const imageInputAccept = ".jpg,.jpeg,.png,.webp,.avif,.heic,.heif,.svg,.gif,.tif,.tiff";
 
 const popularConversions = [
   { from: "HEIC", to: "JPG", tone: "coral" },
@@ -84,14 +104,18 @@ function formatBytes(bytes: number) {
 }
 
 function imageMimeType(file: File) {
-  if (file.type.startsWith("image/")) return file.type;
+  if (supportedImageMimeTypes.has(file.type.toLowerCase())) return file.type;
   const extension = file.name.split(".").pop()?.toLowerCase();
   const types: Record<string, string> = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
     avif: "image/avif",
-    bmp: "image/bmp",
     heic: "image/heic",
     heif: "image/heif",
     svg: "image/svg+xml",
+    gif: "image/gif",
     tif: "image/tiff",
     tiff: "image/tiff",
   };
@@ -119,6 +143,10 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+function delay(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [sourceFormat, setSourceFormat] = useState("自动识别");
@@ -134,6 +162,8 @@ export default function Home() {
   const [scale, setScale] = useState(1);
   const [searchOpen, setSearchOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const [archiveState, setArchiveState] = useState<"idle" | "creating" | "ready" | "error">("idle");
+  const [archiveDownloadUrl, setArchiveDownloadUrl] = useState("");
 
   useEffect(() => {
     if (!toast) return;
@@ -151,6 +181,10 @@ export default function Home() {
       items.reduce((total, item) => total + item.progress, 0) / items.length,
     );
   }, [items]);
+  const completedItems = useMemo(
+    () => items.filter((item) => item.state === "completed" && item.jobId),
+    [items],
+  );
 
   const resetQueuedState = () => {
     setItems((current) =>
@@ -160,10 +194,13 @@ export default function Home() {
         progress: 0,
         state: "idle",
         error: undefined,
+        downloadUrl: undefined,
       })),
     );
     setQueuedCount(0);
     setStatus("idle");
+    setArchiveState("idle");
+    setArchiveDownloadUrl("");
   };
 
   const updateItem = (id: string, patch: Partial<UploadItem>) => {
@@ -173,15 +210,12 @@ export default function Home() {
   };
 
   const addFiles = (files: FileList | File[]) => {
-    if (status === "uploading") {
+    if (status === "uploading" || status === "converting") {
       setToast("请等待当前上传完成");
       return;
     }
     const accepted = Array.from(files).filter((file) => {
-      return (
-        file.type.startsWith("image/") ||
-        /\.(heic|heif|avif|svg|tif|tiff|bmp)$/i.test(file.name)
-      );
+      return supportedImageMimeTypes.has(file.type.toLowerCase()) || supportedImageExtensions.test(file.name);
     });
 
     if (!accepted.length) {
@@ -235,10 +269,53 @@ export default function Home() {
     setItems(remaining);
     setQueuedCount(remainingQueued);
     setStatus(
-      remaining.length > 0 && remainingQueued === remaining.length
-        ? "queued"
+      remaining.length > 0 && remaining.every((item) => item.state === "completed")
+        ? "completed"
         : "idle",
     );
+    setArchiveState("idle");
+    setArchiveDownloadUrl("");
+  };
+
+  const pollConversion = async (itemId: string, jobId: string) => {
+    let requestFailures = 0;
+    while (true) {
+      await delay(1200);
+      try {
+        const job = await getConversionJob(jobId);
+        requestFailures = 0;
+        if (job.status === "queued") {
+          updateItem(itemId, { state: "queued" });
+          continue;
+        }
+        if (job.status === "processing") {
+          updateItem(itemId, { state: "processing" });
+          continue;
+        }
+        if (job.status === "completed" && job.output) {
+          updateItem(itemId, {
+            state: "completed",
+            downloadUrl: resolveApiUrl(job.output.downloadUrl),
+          });
+          return true;
+        }
+        updateItem(itemId, {
+          state: "error",
+          jobId: undefined,
+          error: job.errorMessage ?? "转换失败，请重试",
+        });
+        return false;
+      } catch (error) {
+        requestFailures += 1;
+        if (requestFailures < 4) continue;
+        updateItem(itemId, {
+          state: "error",
+          jobId: undefined,
+          error: error instanceof ApiClientError ? error.message : "查询转换状态失败",
+        });
+        return false;
+      }
+    }
   };
 
   const startConversion = async () => {
@@ -284,12 +361,12 @@ export default function Home() {
           progress: 100,
           state: "queued",
         });
-        return true;
+        return { itemId: item.id, jobId: job.id };
       } catch (error) {
         const message =
           error instanceof ApiClientError ? error.message : "任务创建失败，请重试";
         updateItem(item.id, { state: "error", error: message });
-        return false;
+        return null;
       }
     });
 
@@ -297,12 +374,52 @@ export default function Home() {
       items.filter((item) => Boolean(item.jobId)).length +
       outcomes.filter(Boolean).length;
     setQueuedCount(totalQueued);
-    if (totalQueued === items.length) {
-      setStatus("queued");
-      setToast("文件已上传，转换任务已进入队列");
+    const queuedJobs = outcomes.filter(
+      (outcome): outcome is { itemId: string; jobId: string } => Boolean(outcome),
+    );
+    if (!queuedJobs.length) {
+      setStatus("error");
+      setToast("没有任务成功进入转换队列");
+      return;
+    }
+    setStatus("converting");
+    setToast(
+      totalQueued === items.length
+        ? "文件已上传，正在转换"
+        : `${totalQueued} 个任务正在转换，其余文件可重试`,
+    );
+    const completed = await Promise.all(
+      queuedJobs.map((job) => pollConversion(job.itemId, job.jobId)),
+    );
+    if (completed.every(Boolean) && totalQueued === items.length) {
+      setStatus("completed");
+      setToast("全部文件转换完成");
     } else {
       setStatus("error");
-      setToast(`${totalQueued} 个任务已排队，其余文件可重试`);
+      setToast("部分文件转换失败，可移除失败项后继续下载");
+    }
+  };
+
+  const startArchiveDownload = async () => {
+    const jobIds = completedItems.flatMap((item) => (item.jobId ? [item.jobId] : []));
+    if (!jobIds.length) return;
+    setArchiveState("creating");
+    try {
+      let archive = await createArchive(jobIds);
+      while (archive.status === "queued" || archive.status === "processing") {
+        await delay(1200);
+        archive = await getArchive(archive.id);
+      }
+      if (archive.status !== "completed" || !archive.output) {
+        throw new ApiClientError(archive.errorMessage ?? "压缩包生成失败");
+      }
+      const downloadUrl = resolveApiUrl(archive.output.downloadUrl);
+      setArchiveDownloadUrl(downloadUrl);
+      setArchiveState("ready");
+      window.location.assign(downloadUrl);
+    } catch (error) {
+      setArchiveState("error");
+      setToast(error instanceof ApiClientError ? error.message : "压缩包生成失败");
     }
   };
 
@@ -317,8 +434,10 @@ export default function Home() {
   const buttonLabel =
     status === "uploading"
       ? `正在上传 ${uploadProgress}%`
-      : status === "queued"
-        ? "已加入转换队列"
+      : status === "converting"
+        ? "正在转换"
+        : status === "completed"
+          ? "转换完成"
         : items.length
           ? `转换 ${items.filter((item) => !item.jobId).length || items.length} 个文件`
           : "开始转换";
@@ -445,7 +564,7 @@ export default function Home() {
                     上传图片
                   </button>
                   <p>也可以拖放多个文件</p>
-                  <span>支持 JPG、PNG、WebP、AVIF、HEIC 等常见格式</span>
+                  <span>支持 JPG、PNG、WebP、AVIF、HEIC 等常见格式 · 文件仅保存 2 小时</span>
                 </>
               ) : (
                 <div className="file-queue" aria-live="polite">
@@ -453,18 +572,24 @@ export default function Home() {
                     <div>
                       <strong>{items.length} 个图片已添加</strong>
                       <span>{formatBytes(totalSize)}</span>
+                      <span>文件将在上传 2 小时后自动删除</span>
                     </div>
                     <button
                       type="button"
-                      disabled={status === "uploading"}
+                      disabled={status === "uploading" || status === "converting"}
                       onClick={() => inputRef.current?.click()}
                     >
                       继续添加
                     </button>
                   </div>
-                  <div className="queue-list">
-                    {items.slice(0, 3).map((item) => (
-                      <div className="queue-item" key={item.id}>
+                  <div
+                    className="queue-list"
+                    role="list"
+                    aria-label="已上传图片列表"
+                    tabIndex={items.length > 3 ? 0 : undefined}
+                  >
+                    {items.map((item) => (
+                      <div className="queue-item" key={item.id} role="listitem">
                         <div className="file-thumb">
                           {item.previewUrl ? (
                             // Blob URLs are created locally after the user selects a file, so next/image cannot optimize them.
@@ -480,18 +605,24 @@ export default function Home() {
                             {formatBytes(item.file.size)}
                             {item.state === "uploading" && ` · 上传 ${item.progress}%`}
                             {item.state === "queued" && " · 已排队"}
+                            {item.state === "processing" && " · 转换中"}
+                            {item.state === "completed" && " · 转换完成"}
                             {item.state === "error" && ` · ${item.error ?? "失败"}`}
                           </span>
                         </div>
-                        {item.state === "uploading" && (
+                        {(item.state === "uploading" || item.state === "processing" || item.state === "queued") && (
                           <SpinnerGap className="spinner queue-spinner" size={21} weight="bold" aria-label="正在上传" />
                         )}
-                        {item.state === "queued" && <CheckCircle className="done-icon" size={22} weight="fill" aria-label="已排队" />}
+                        {item.state === "completed" && item.downloadUrl && (
+                          <a className="queue-download" href={item.downloadUrl} aria-label={`下载 ${item.file.name}`}>
+                            <DownloadSimple size={20} weight="bold" />
+                          </a>
+                        )}
                         {item.state === "error" && <span className="queue-error" aria-label="任务失败">!</span>}
                         <button
                           className="remove-file"
                           type="button"
-                          disabled={status === "uploading"}
+                          disabled={status === "uploading" || status === "converting"}
                           onClick={() => removeItem(item.id)}
                           aria-label={`移除 ${item.file.name}`}
                         >
@@ -499,7 +630,6 @@ export default function Home() {
                         </button>
                       </div>
                     ))}
-                    {items.length > 3 && <p className="more-files">还有 {items.length - 3} 个文件</p>}
                   </div>
                 </div>
               )}
@@ -564,19 +694,42 @@ export default function Home() {
                 查看全部图片格式 <ArrowRight size={16} weight="bold" />
               </button>
               <button
-                className={`convert-button ${status === "queued" ? "is-done" : ""}`}
+                className={`convert-button ${status === "completed" ? "is-done" : ""}`}
                 type="button"
                 onClick={startConversion}
-                disabled={status === "uploading" || status === "queued"}
+                disabled={status === "uploading" || status === "converting" || status === "completed"}
               >
-                {status === "uploading" ? (
+                {status === "uploading" || status === "converting" ? (
                   <SpinnerGap className="spinner" size={22} weight="bold" />
-                ) : status === "queued" ? (
+                ) : status === "completed" ? (
                   <CheckCircle size={21} weight="fill" />
                 ) : null}
                 {buttonLabel}
               </button>
             </div>
+            {completedItems.length >= 2 && (
+              <div className="archive-actions">
+                <button
+                  type="button"
+                  className="archive-button"
+                  disabled={archiveState === "creating"}
+                  onClick={archiveState === "ready" && archiveDownloadUrl
+                    ? () => window.location.assign(archiveDownloadUrl)
+                    : startArchiveDownload}
+                >
+                  {archiveState === "creating" ? (
+                    <SpinnerGap className="spinner" size={19} weight="bold" />
+                  ) : (
+                    <FileZip size={19} weight="bold" />
+                  )}
+                  {archiveState === "creating"
+                    ? "正在打包"
+                    : archiveState === "ready"
+                      ? "重新下载压缩包"
+                      : `打包下载 ${completedItems.length} 个文件`}
+                </button>
+              </div>
+            )}
             {status === "uploading" && (
               <div
                 className="upload-progress"
@@ -589,9 +742,14 @@ export default function Home() {
                 <span style={{ width: `${uploadProgress}%` }} />
               </div>
             )}
-            {status === "queued" && (
+            {status === "converting" && (
               <p className="conversion-message" role="status">
-                <CheckCircle size={18} weight="fill" /> {queuedCount} 个任务已排队，转换引擎暂未启用
+                <SpinnerGap className="spinner" size={18} weight="bold" /> {queuedCount} 个任务正在转换
+              </p>
+            )}
+            {status === "completed" && (
+              <p className="conversion-message" role="status">
+                <CheckCircle size={18} weight="fill" /> {completedItems.length} 个文件转换完成，请在 2 小时内下载
               </p>
             )}
             {status === "error" && <p className="conversion-message is-error">部分文件未成功排队，请重试失败项</p>}
@@ -650,7 +808,7 @@ export default function Home() {
         </div>
       </footer>
 
-      <input ref={inputRef} className="visually-hidden-input" type="file" accept="image/*,.heic,.heif,.avif,.svg,.tif,.tiff,.bmp" multiple disabled={status === "uploading"} onChange={handleFileChange} />
+      <input ref={inputRef} className="visually-hidden-input" type="file" accept={imageInputAccept} multiple disabled={status === "uploading" || status === "converting"} onChange={handleFileChange} />
       {toast && <div className="toast" role="status">{toast}</div>}
     </main>
   );

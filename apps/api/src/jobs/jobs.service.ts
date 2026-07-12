@@ -1,13 +1,14 @@
 import { HttpStatus, Injectable } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import { ApiException } from "../common/api-exception";
+import { outputFileName, type TargetFormat } from "../conversion/formats";
 import { DatabaseService } from "../database/database.service";
 import { jobs } from "../database/schema";
 import { QueueService } from "../queue/queue.service";
 import { StorageService } from "../storage/storage.service";
 import { CreateJobDto } from "./dto/create-job.dto";
 
-const QUEUED_MESSAGE = "任务已进入队列，当前版本尚未启用转换引擎";
+const QUEUED_MESSAGE = "任务已进入转换队列";
 
 @Injectable()
 export class JobsService {
@@ -58,13 +59,7 @@ export class JobsService {
       .returning();
 
     try {
-      await this.queue.enqueue({
-        jobId: job.id,
-        inputObjectKey: job.inputObjectKey,
-        targetFormat: job.targetFormat,
-        quality: job.quality,
-        scale: job.scale,
-      });
+      await this.queue.enqueue({ jobId: job.id });
     } catch {
       await this.database.db
         .update(jobs)
@@ -85,6 +80,33 @@ export class JobsService {
   }
 
   async findOne(id: string) {
+    return this.toResponse(await this.getJob(id));
+  }
+
+  async download(id: string) {
+    const job = await this.getJob(id);
+    if (job.status === "expired") {
+      throw new ApiException(
+        HttpStatus.GONE,
+        "FILE_EXPIRED",
+        "文件已超过2小时保存期限并自动删除",
+      );
+    }
+    if (job.status !== "completed" || !job.outputObjectKey || !job.outputMimeType) {
+      throw new ApiException(
+        HttpStatus.CONFLICT,
+        "JOB_NOT_COMPLETED",
+        "转换任务尚未完成",
+      );
+    }
+    return this.storage.createDownloadUrl(
+      job.outputObjectKey,
+      outputFileName(job.originalName, job.targetFormat as TargetFormat),
+      job.outputMimeType,
+    );
+  }
+
+  private async getJob(id: string) {
     const [job] = await this.database.db
       .select()
       .from(jobs)
@@ -99,9 +121,23 @@ export class JobsService {
       );
     }
 
+    return job;
+  }
+
+  private toResponse(job: typeof jobs.$inferSelect) {
+    const output =
+      job.status === "completed" && job.outputObjectKey && job.outputMimeType
+        ? {
+            fileName: outputFileName(job.originalName, job.targetFormat as TargetFormat),
+            mimeType: job.outputMimeType,
+            size: job.outputByteSize,
+            downloadUrl: `/api/v1/jobs/${job.id}/download`,
+          }
+        : undefined;
     return {
       ...job,
       ...(job.status === "queued" ? { message: QUEUED_MESSAGE } : {}),
+      ...(output ? { output } : {}),
     };
   }
 }

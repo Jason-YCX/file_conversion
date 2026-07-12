@@ -7,9 +7,9 @@
 
 ## 当前状态
 
-- 已完成：浏览器签名直传、MinIO存储、PostgreSQL任务记录和BullMQ排队。
-- 当前链路是 `上传 -> 对象存储 -> 数据库任务 -> conversion 队列`。
-- 尚未实现实际转换 Worker；“已排队”不等于“转换完成”，对外说明时必须明确区分。
+- 已完成：浏览器签名直传、MinIO存储、PostgreSQL任务记录、BullMQ排队、独立图片转换 Worker 和 ZIP 打包 Worker。
+- 当前链路是 `上传 -> 对象存储 -> 数据库任务 -> conversion 队列 -> 转换 Worker -> 结果存储 -> 下载`。
+- 转换状态包含 `queued / processing / completed / failed / cancelled`，只有 `completed` 才能下载。
 
 ## 架构边界
 
@@ -26,11 +26,17 @@
 - 修改环境变量时同步根目录或 `apps/api/.env.example`。
 - 修改数据库结构时同步Drizzle schema并提交生成的迁移。
 - 修改API时同步DTO、Swagger描述和相关测试。
+- 图片转换输入覆盖 JPG、PNG、WebP、AVIF、HEIC/HEIF、SVG、GIF、TIFF，输出覆盖 WebP、JPG、PNG、AVIF、GIF、TIFF，共 42 条跨格式路径；BMP 不在支持范围内。
+- 动态 GIF/WebP/TIFF 仅在输出 GIF/WebP/AVIF 时保留动画；转 JPG/PNG/TIFF 时取首帧。
+- 批量下载由后端 `archive` 队列流式生成 ZIP，不在浏览器内压缩大文件。
+- `uploads/`、`converted/`、`archives/` 下的文件统一只保留2小时；Worker 启动时及每10分钟清理，过期任务标记为 `expired`。
 - 基础设施连接异常时，先启动Compose，再检查 `/api/v1/health`，不要直接改业务代码规避。
 
 ## 常用命令
 
 - 完整本地环境：`npm run dev:full`
+- 单独运行转换 Worker：`npm run dev:worker`
+- Worker 开发模式必须通过 Nest CLI 的监听编译启动；不要使用缺少装饰器元数据的 `tsx watch src/worker.ts`。
 - 静态检查：`npm run lint`
 - 测试：`npm test`
 
@@ -38,3 +44,11 @@
 
 - 本地运行、端口、接口和当前能力：读取 `README.md`。
 - 只有修改后端接口时，才查看本地Swagger及 `apps/api/src` 对应模块。
+
+## 对话约束
+
+每次对话中，如果有功能更新、逻辑优化、性能升级的需要及时更新到当前文档中，确保能从当前文档了解到整个项目的架构、逻辑；
+
+对项目的修改不要自由发挥，不要执行超出对话的操作。
+
+每次回复都叫我"老大"

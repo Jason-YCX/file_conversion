@@ -9,18 +9,12 @@ import {
   MaxLength,
   Min,
 } from "class-validator";
-
-const SOURCE_FORMATS = [
-  "自动识别",
-  "JPG",
-  "PNG",
-  "WebP",
-  "AVIF",
-  "HEIC",
-  "SVG",
-] as const;
-
-const TARGET_FORMATS = ["WebP", "JPG", "PNG", "AVIF", "GIF", "TIFF"] as const;
+import {
+  SOURCE_FORMATS,
+  TARGET_FORMATS,
+  type SourceFormat,
+  type TargetFormat,
+} from "../../conversion/formats";
 
 export class CreateJobDto {
   @ApiProperty({ example: "uploads/2026/07/11/uuid.heic" })
@@ -48,11 +42,11 @@ export class CreateJobDto {
 
   @ApiProperty({ enum: SOURCE_FORMATS, example: "自动识别" })
   @IsIn(SOURCE_FORMATS)
-  sourceFormat: (typeof SOURCE_FORMATS)[number];
+  sourceFormat: SourceFormat;
 
   @ApiProperty({ enum: TARGET_FORMATS, example: "WebP" })
   @IsIn(TARGET_FORMATS)
-  targetFormat: (typeof TARGET_FORMATS)[number];
+  targetFormat: TargetFormat;
 
   @ApiProperty({ minimum: 40, maximum: 100, example: 86 })
   @IsInt()

@@ -1,13 +1,18 @@
 import {
+  GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "node:crypto";
+import type { Readable } from "node:stream";
 
 export type StoredObject = {
   size: number;
@@ -19,11 +24,15 @@ export class StorageService {
   private readonly client: S3Client;
   private readonly bucket: string;
   private readonly expiresIn: number;
+  private readonly downloadExpiresIn: number;
 
   constructor(config: ConfigService) {
     this.bucket = config.getOrThrow<string>("S3_BUCKET");
     this.expiresIn = config.getOrThrow<number>(
       "UPLOAD_URL_EXPIRES_SECONDS",
+    );
+    this.downloadExpiresIn = config.getOrThrow<number>(
+      "DOWNLOAD_URL_EXPIRES_SECONDS",
     );
     this.client = new S3Client({
       endpoint: config.getOrThrow<string>("S3_ENDPOINT"),
@@ -73,6 +82,84 @@ export class StorageService {
       if (status === 404) return null;
       throw error;
     }
+  }
+
+  async getObjectBuffer(objectKey: string) {
+    const result = await this.client.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }),
+    );
+    if (!result.Body) throw new Error("Stored object has no body");
+    return Buffer.from(await result.Body.transformToByteArray());
+  }
+
+  async getObjectStream(objectKey: string) {
+    const result = await this.client.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }),
+    );
+    if (!result.Body) throw new Error("Stored object has no body");
+    return result.Body as Readable;
+  }
+
+  async putObject(objectKey: string, body: Buffer, contentType: string) {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: objectKey,
+        Body: body,
+        ContentType: contentType,
+      }),
+    );
+  }
+
+  async uploadStream(objectKey: string, body: Readable, contentType: string) {
+    await new Upload({
+      client: this.client,
+      params: { Bucket: this.bucket, Key: objectKey, Body: body, ContentType: contentType },
+    }).done();
+  }
+
+  async createDownloadUrl(objectKey: string, fileName: string, mimeType: string) {
+    const disposition = `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+    return getSignedUrl(
+      this.client,
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: objectKey,
+        ResponseContentDisposition: disposition,
+        ResponseContentType: mimeType,
+      }),
+      { expiresIn: this.downloadExpiresIn },
+    );
+  }
+
+  async deleteObjectsOlderThan(prefixes: string[], cutoff: Date) {
+    let deleted = 0;
+    for (const prefix of prefixes) {
+      let continuationToken: string | undefined;
+      do {
+        const page = await this.client.send(
+          new ListObjectsV2Command({
+            Bucket: this.bucket,
+            Prefix: prefix,
+            ContinuationToken: continuationToken,
+          }),
+        );
+        const keys = (page.Contents ?? [])
+          .filter((object) => object.Key && object.LastModified && object.LastModified <= cutoff)
+          .map((object) => ({ Key: object.Key! }));
+        if (keys.length) {
+          await this.client.send(
+            new DeleteObjectsCommand({
+              Bucket: this.bucket,
+              Delete: { Objects: keys, Quiet: true },
+            }),
+          );
+          deleted += keys.length;
+        }
+        continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+      } while (continuationToken);
+    }
+    return deleted;
   }
 
   async ping() {

@@ -4,6 +4,22 @@ import { ApiException } from "../common/api-exception";
 import { StorageService } from "../storage/storage.service";
 import { PresignUploadDto } from "./dto/presign-upload.dto";
 
+const SUPPORTED_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/pjpeg",
+  "image/png",
+  "image/x-png",
+  "image/webp",
+  "image/avif",
+  "image/heic",
+  "image/heif",
+  "image/svg+xml",
+  "image/gif",
+  "image/tiff",
+  "image/x-tiff",
+]);
+
 @Injectable()
 export class UploadsService {
   private readonly maxUploadBytes: number;
@@ -16,11 +32,11 @@ export class UploadsService {
   }
 
   async presign(input: PresignUploadDto) {
-    if (!input.mimeType.startsWith("image/")) {
+    if (!SUPPORTED_IMAGE_MIME_TYPES.has(input.mimeType.toLowerCase())) {
       throw new ApiException(
         HttpStatus.UNSUPPORTED_MEDIA_TYPE,
         "UNSUPPORTED_FILE_TYPE",
-        "当前阶段仅支持图片文件",
+        "当前阶段不支持该图片格式",
       );
     }
     if (input.size > this.maxUploadBytes) {

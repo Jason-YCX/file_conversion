@@ -35,5 +35,40 @@ export function validateConfig(input: Record<string, unknown>) {
       50 * 1024 * 1024,
       "MAX_UPLOAD_BYTES",
     ),
+    DOWNLOAD_URL_EXPIRES_SECONDS: numberValue(
+      input.DOWNLOAD_URL_EXPIRES_SECONDS,
+      900,
+      "DOWNLOAD_URL_EXPIRES_SECONDS",
+    ),
+    CONVERSION_WORKER_CONCURRENCY: numberValue(
+      input.CONVERSION_WORKER_CONCURRENCY,
+      2,
+      "CONVERSION_WORKER_CONCURRENCY",
+    ),
+    ARCHIVE_WORKER_CONCURRENCY: numberValue(
+      input.ARCHIVE_WORKER_CONCURRENCY,
+      1,
+      "ARCHIVE_WORKER_CONCURRENCY",
+    ),
+    CONVERSION_TIMEOUT_MS: numberValue(
+      input.CONVERSION_TIMEOUT_MS,
+      180_000,
+      "CONVERSION_TIMEOUT_MS",
+    ),
+    MAX_INPUT_PIXELS: numberValue(
+      input.MAX_INPUT_PIXELS,
+      40_000_000,
+      "MAX_INPUT_PIXELS",
+    ),
+    FILE_RETENTION_SECONDS: numberValue(
+      input.FILE_RETENTION_SECONDS,
+      2 * 60 * 60,
+      "FILE_RETENTION_SECONDS",
+    ),
+    FILE_CLEANUP_INTERVAL_SECONDS: numberValue(
+      input.FILE_CLEANUP_INTERVAL_SECONDS,
+      10 * 60,
+      "FILE_CLEANUP_INTERVAL_SECONDS",
+    ),
   };
 }

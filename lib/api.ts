@@ -24,6 +24,28 @@ export type QueuedJob = {
   message: string;
 };
 
+export type TaskOutput = {
+  fileName: string;
+  mimeType: string;
+  size: number | null;
+  downloadUrl: string;
+};
+
+export type ConversionJob = {
+  id: string;
+  status: "queued" | "processing" | "completed" | "failed" | "cancelled" | "expired";
+  detectedSourceFormat?: string | null;
+  errorMessage?: string | null;
+  output?: TaskOutput;
+};
+
+export type ArchiveTask = {
+  id: string;
+  status: "queued" | "processing" | "completed" | "failed" | "cancelled" | "expired";
+  errorMessage?: string | null;
+  output?: TaskOutput;
+};
+
 export type CreateJobInput = {
   objectKey: string;
   fileName: string;
@@ -96,7 +118,28 @@ export function createConversionJob(input: CreateJobInput) {
   });
 }
 
-async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
+export function getConversionJob(id: string) {
+  return requestJson<ConversionJob>(`/jobs/${id}`);
+}
+
+export function createArchive(jobIds: string[]) {
+  return requestJson<ArchiveTask>("/archives", {
+    method: "POST",
+    body: JSON.stringify({ jobIds }),
+  });
+}
+
+export function getArchive(id: string) {
+  return requestJson<ArchiveTask>(`/archives/${id}`);
+}
+
+export function resolveApiUrl(path: string) {
+  if (/^https?:\/\//i.test(path)) return path;
+  const apiOrigin = new URL(API_BASE_URL).origin;
+  return new URL(path, apiOrigin).toString();
+}
+
+async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {

@@ -53,10 +53,8 @@ describe("JobsService", () => {
     const result = await service.create(input);
 
     expect(result.status).toBe("queued");
-    expect(result.message).toContain("尚未启用转换引擎");
-    expect(queue.enqueue).toHaveBeenCalledWith(
-      expect.objectContaining({ jobId: result.id, inputObjectKey: input.objectKey }),
-    );
+    expect(result.message).toContain("转换队列");
+    expect(queue.enqueue).toHaveBeenCalledWith({ jobId: result.id });
   });
 
   it("rejects a task when the uploaded object is missing", async () => {

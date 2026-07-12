@@ -14,10 +14,13 @@ export class HealthService {
   ) {}
 
   async check() {
-    const [database, redis, storage] = await Promise.all([
+    const [database, redis, storage, conversionWorker] = await Promise.all([
       this.status(() => this.database.ping()),
       this.status(() => this.queue.ping()),
       this.status(() => this.storage.ping()),
+      this.status(async () => {
+        if (!(await this.queue.isWorkerAlive())) throw new Error("worker offline");
+      }),
     ]);
     const services = { database, redis, storage };
     const isHealthy = Object.values(services).every((value) => value === "up");
@@ -25,7 +28,7 @@ export class HealthService {
     return {
       status: isHealthy ? ("ok" as const) : ("degraded" as const),
       services,
-      conversionEngine: "disabled" as const,
+      conversionEngine: conversionWorker === "up" ? ("enabled" as const) : ("disabled" as const),
       timestamp: new Date().toISOString(),
     };
   }

@@ -34,6 +34,17 @@ describe("UploadsService", () => {
     });
   });
 
+  it("rejects BMP uploads", async () => {
+    const { service } = createService();
+
+    await expect(
+      service.presign({ fileName: "a.bmp", mimeType: "image/bmp", size: 512 }),
+    ).rejects.toMatchObject({
+      status: HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+      response: { code: "UNSUPPORTED_FILE_TYPE" },
+    });
+  });
+
   it("rejects an oversized image", async () => {
     const { service } = createService(100);
 
