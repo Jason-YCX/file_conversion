@@ -27,6 +27,11 @@
 # misc
 .DS_Store
 *.pem
+/certs/**/*.crt
+/certs/**/*.key
+/certs/**/*.cer
+/certs/**/*.pfx
+/certs/**/*.p12
 *.tsbuildinfo
 /.idea/
 /.vscode/
@@ -40,6 +45,7 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
+!.env.production.example
 !apps/api/.env.example
 
 # vercel
@@ -53,3 +59,5 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+/backups/
+/.deploy/

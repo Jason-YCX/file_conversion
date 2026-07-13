@@ -8,6 +8,9 @@
 ## 当前状态
 
 - 已完成：浏览器签名直传、MinIO存储、PostgreSQL任务记录、BullMQ排队、独立图片转换 Worker 和 ZIP 打包 Worker。
+- 前端采用复古像素宇宙视觉，动效直接映射现有上传和转换状态，触屏及减少动态效果模式自动降级。
+- 已补齐单服务器生产部署：Caddy、Web、API、Worker、PostgreSQL、Redis和MinIO由独立生产Compose统一编排。
+- 生产HTTPS使用三套腾讯云手动证书；部署前校验证书，替换后通过Caddy热重载生效。
 - 当前链路是 `上传 -> 对象存储 -> 数据库任务 -> conversion 队列 -> 转换 Worker -> 结果存储 -> 下载`。
 - 转换状态包含 `queued / processing / completed / failed / cancelled`，只有 `completed` 才能下载。
 
@@ -19,6 +22,7 @@
 - 图片、音视频、文档等CPU密集转换必须由独立 Worker 消费 `conversion` 队列。
 - 不要在 Next.js 或 NestJS 请求进程内执行长时间转换。
 - 未经明确要求，不要用D1替换PostgreSQL，也不要把业务存储耦合到前端Sites Worker。
+- 生产环境只由Caddy暴露80/443；MinIO内部读写使用 `S3_ENDPOINT`，浏览器签名地址使用 `S3_PUBLIC_ENDPOINT`。
 
 ## 开发约束
 
@@ -36,6 +40,11 @@
 
 - 完整本地环境：`npm run dev:full`
 - 单独运行转换 Worker：`npm run dev:worker`
+- 首次生产部署：`SKIP_GIT_PULL=1 npm run deploy:prod`
+- 后续生产更新：`npm run deploy:prod`
+- 生产证书校验/重载：`npm run certs:check` / `npm run certs:reload`
+- 生产配置、备份、恢复和回滚：读取 `docs/deployment.md`。
+- 修改完成后不要主动启动项目；默认复用用户已经启动的服务，启动动作交给用户执行。
 - Worker 开发模式必须通过 Nest CLI 的监听编译启动；不要使用缺少装饰器元数据的 `tsx watch src/worker.ts`。
 - 静态检查：`npm run lint`
 - 测试：`npm test`

@@ -1,0 +1,22 @@
+{$APP_DOMAIN} {
+	tls /etc/caddy/certs/qingzhuan/cert.pem /etc/caddy/certs/qingzhuan/key.pem
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	}
+	reverse_proxy web:3000
+}
+
+{$API_DOMAIN} {
+	tls /etc/caddy/certs/qingzhuan-api/cert.pem /etc/caddy/certs/qingzhuan-api/key.pem
+	encode zstd gzip
+	reverse_proxy api:4000
+}
+
+{$FILES_DOMAIN} {
+	tls /etc/caddy/certs/qingzhuan-files/cert.pem /etc/caddy/certs/qingzhuan-files/key.pem
+	reverse_proxy minio:9000
+}

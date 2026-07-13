@@ -4,7 +4,8 @@
 
 ## 当前能力
 
-- 方案 2 的暖白 / 紫色响应式首页
+- 暖白 / 紫橙的复古像素宇宙响应式首页，包含星球、UFO、火箭轨道与状态彩蛋
+- 桌面端保留系统指针并叠加光点跟随与交互吸附，触屏和减少动态效果模式自动关闭
 - 图片拖放与多文件队列
 - 上传列表超出可视区域后支持内部滚动并完整显示每个文件状态
 - 全局操作消息统一显示在页面上方，不遮挡底部操作区域
@@ -51,6 +52,32 @@ npm run infra:down
 `dev:worker` 使用 NestJS 的 TypeScript 监听编译链路启动，确保依赖注入所需的装饰器元数据完整；不要改用 `tsx watch src/worker.ts` 直接启动 Worker。
 
 环境变量模板位于根目录和 `apps/api/.env.example`。默认值可直接匹配 `compose.yaml`，一般无需创建本地环境文件。
+
+## 生产部署
+
+仓库包含同一台Linux服务器自托管所需的生产文件：
+
+- `Dockerfile.web`：构建Vinext standalone前端镜像
+- `Dockerfile.backend`：构建NestJS API和转换Worker共用镜像
+- `compose.production.yaml`：编排Caddy、Web、API、Worker、PostgreSQL、Redis和MinIO
+- `Caddyfile`：为前端、API和对象存储域名提供HTTPS与反向代理
+- `certs/`：约定三套腾讯云手动证书的目录和固定文件名
+- `.env.production.example`：不含真实密钥的生产环境模板
+- `scripts/`：部署、证书校验/热重载、健康检查、备份、恢复和应用镜像回滚
+
+首次部署前，将 `.env.production.example` 复制为 `.env.production`，填写域名和随机密钥，并按 `certs/README.md` 放置三套腾讯云证书，然后运行：
+
+```bash
+SKIP_GIT_PULL=1 ./scripts/deploy.sh
+```
+
+后续服务器更新运行：
+
+```bash
+./scripts/deploy.sh
+```
+
+生产环境将MinIO内部读写地址与浏览器签名地址分开；只有Caddy的80/443端口对公网开放，PostgreSQL、Redis、MinIO控制台、Web和API端口均只在Docker网络内使用。完整服务器准备、DNS、GitHub手动发布、备份与回滚说明见 [`docs/deployment.md`](docs/deployment.md)。
 
 ## API
 

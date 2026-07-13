@@ -1,0 +1,232 @@
+name: qingzhuan-production
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-backend-environment: &backend-environment
+  PORT: "4000"
+  CORS_ORIGINS: https://${APP_DOMAIN:?set APP_DOMAIN in .env.production}
+  DATABASE_URL: postgresql://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379/0
+  S3_ENDPOINT: http://minio:9000
+  S3_PUBLIC_ENDPOINT: https://${FILES_DOMAIN:?set FILES_DOMAIN in .env.production}
+  S3_REGION: us-east-1
+  S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+  S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+  S3_BUCKET: ${S3_BUCKET:-qingzhuan-files}
+  S3_FORCE_PATH_STYLE: "true"
+  UPLOAD_URL_EXPIRES_SECONDS: ${UPLOAD_URL_EXPIRES_SECONDS:-900}
+  MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-52428800}
+  DOWNLOAD_URL_EXPIRES_SECONDS: ${DOWNLOAD_URL_EXPIRES_SECONDS:-900}
+  CONVERSION_WORKER_CONCURRENCY: ${CONVERSION_WORKER_CONCURRENCY:-2}
+  ARCHIVE_WORKER_CONCURRENCY: ${ARCHIVE_WORKER_CONCURRENCY:-1}
+  CONVERSION_TIMEOUT_MS: ${CONVERSION_TIMEOUT_MS:-180000}
+  MAX_INPUT_PIXELS: ${MAX_INPUT_PIXELS:-40000000}
+  FILE_RETENTION_SECONDS: ${FILE_RETENTION_SECONDS:-7200}
+  FILE_CLEANUP_INTERVAL_SECONDS: ${FILE_CLEANUP_INTERVAL_SECONDS:-600}
+
+services:
+  caddy:
+    image: caddy:2.10.2-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN in .env.production}
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env.production}
+      FILES_DOMAIN: ${FILES_DOMAIN:?set FILES_DOMAIN in .env.production}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/etc/caddy/certs:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - app-network
+
+  web:
+    image: qingzhuan-web:${APP_VERSION:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_BASE_URL: https://${API_DOMAIN:?set API_DOMAIN in .env.production}/api/v1
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+    expose:
+      - "3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    init: true
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - app-network
+
+  api:
+    image: qingzhuan-backend:${APP_VERSION:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["node", "dist/main.js"]
+    environment: *backend-environment
+    expose:
+      - "4000"
+    depends_on: &backend-dependencies
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4000/api/v1/health').then(r=>r.json()).then(v=>{if(v.status!=='ok'||v.conversionEngine!=='enabled')process.exit(1)}).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    init: true
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - app-network
+
+  worker:
+    image: qingzhuan-backend:${APP_VERSION:-local}
+    command: ["node", "dist/worker.js"]
+    environment: *backend-environment
+    depends_on: *backend-dependencies
+    stop_grace_period: 210s
+    init: true
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - app-network
+
+  migrate:
+    image: qingzhuan-backend:${APP_VERSION:-local}
+    command: ["node", "dist/database/migrate.js"]
+    environment: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - tools
+    restart: "no"
+    logging: *default-logging
+    networks:
+      - app-network
+
+  postgres:
+    image: postgres:17.10-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - app-network
+
+  redis:
+    image: redis:7.4.9-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - app-network
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      MINIO_API_CORS_ALLOW_ORIGIN: https://${APP_DOMAIN:?set APP_DOMAIN}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - app-network
+
+  minio-init:
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      S3_BUCKET: ${S3_BUCKET:-qingzhuan-files}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing "local/$$S3_BUCKET"
+    restart: "no"
+    logging: *default-logging
+    networks:
+      - app-network
+
+volumes:
+  caddy-data:
+  caddy-config:
+  postgres-data:
+  redis-data:
+  minio-data:
+
+networks:
+  app-network:
+    driver: bridge

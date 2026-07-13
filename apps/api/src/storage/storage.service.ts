@@ -22,6 +22,7 @@ export type StoredObject = {
 @Injectable()
 export class StorageService {
   private readonly client: S3Client;
+  private readonly signingClient: S3Client;
   private readonly bucket: string;
   private readonly expiresIn: number;
   private readonly downloadExpiresIn: number;
@@ -34,14 +35,21 @@ export class StorageService {
     this.downloadExpiresIn = config.getOrThrow<number>(
       "DOWNLOAD_URL_EXPIRES_SECONDS",
     );
-    this.client = new S3Client({
-      endpoint: config.getOrThrow<string>("S3_ENDPOINT"),
+    const commonClientConfig = {
       region: config.getOrThrow<string>("S3_REGION"),
       forcePathStyle: config.getOrThrow<boolean>("S3_FORCE_PATH_STYLE"),
       credentials: {
         accessKeyId: config.getOrThrow<string>("S3_ACCESS_KEY_ID"),
         secretAccessKey: config.getOrThrow<string>("S3_SECRET_ACCESS_KEY"),
       },
+    };
+    this.client = new S3Client({
+      ...commonClientConfig,
+      endpoint: config.getOrThrow<string>("S3_ENDPOINT"),
+    });
+    this.signingClient = new S3Client({
+      ...commonClientConfig,
+      endpoint: config.getOrThrow<string>("S3_PUBLIC_ENDPOINT"),
     });
   }
 
@@ -54,7 +62,7 @@ export class StorageService {
       Key: objectKey,
       ContentType: mimeType,
     });
-    const uploadUrl = await getSignedUrl(this.client, command, {
+    const uploadUrl = await getSignedUrl(this.signingClient, command, {
       expiresIn: this.expiresIn,
     });
 
@@ -121,7 +129,7 @@ export class StorageService {
   async createDownloadUrl(objectKey: string, fileName: string, mimeType: string) {
     const disposition = `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`;
     return getSignedUrl(
-      this.client,
+      this.signingClient,
       new GetObjectCommand({
         Bucket: this.bucket,
         Key: objectKey,

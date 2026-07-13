@@ -63,7 +63,7 @@ test("keeps the server-backed conversion experience interactive and responsive",
   assert.match(apiClient, /XMLHttpRequest/);
   assert.match(css, /@media \(max-width: 820px\)/);
   assert.match(css, /prefers-reduced-motion: reduce/);
-  assert.match(css, /\.queue-list[\s\S]*max-height: 220px[\s\S]*overflow-y: auto/);
+  assert.match(css, /\.queue-list[\s\S]*max-height: 240px[\s\S]*overflow-y: auto/);
   assert.match(css, /\.toast[\s\S]*top: calc\(104px \+ env\(safe-area-inset-top, 0px\)\)/);
   assert.doesNotMatch(css.match(/\.toast \{[\s\S]*?\}/)?.[0] ?? "", /bottom:/);
   assert.match(css, /:focus-visible/);
@@ -75,5 +75,24 @@ test("keeps the server-backed conversion experience interactive and responsive",
   assert.doesNotMatch(page, /convertInBrowser|canvas\.toBlob|转换引擎暂未启用/);
   assert.doesNotMatch(page + layout, /SkeletonPreview|_sites-preview|codex-preview/);
 
+  assert.match(page, /PixelCursor/);
+  assert.match(page, /pixel-horizon\.png/);
+  assert.match(page, /pixel-ufo\.png/);
+  assert.match(page, /pixel-rocket\.png/);
+  assert.match(page, /pixel-stars\.png/);
+  assert.match(page, /celebrating/);
+  assert.match(css, /@font-face[\s\S]*Ark Pixel/);
+  assert.match(css, /\(hover: none\), \(pointer: coarse\)/);
+  assert.match(css, /\.pixel-cursor-halo\.is-active/);
+
   await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
+
+  await Promise.all([
+    access(new URL("../public/pixel/pixel-horizon.png", import.meta.url)),
+    access(new URL("../public/pixel/pixel-ufo.png", import.meta.url)),
+    access(new URL("../public/pixel/pixel-rocket.png", import.meta.url)),
+    access(new URL("../public/pixel/pixel-stars.png", import.meta.url)),
+    access(new URL("../public/pixel/pixel-orbit-trail.png", import.meta.url)),
+    access(new URL("../public/fonts/ark-pixel/OFL.txt", import.meta.url)),
+  ]);
 });

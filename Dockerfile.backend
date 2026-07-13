@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1.7
+
+FROM node:22-bookworm-slim AS dependencies
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+RUN npm ci
+
+FROM dependencies AS builder
+WORKDIR /app
+COPY apps/api apps/api
+RUN npm run build:api
+
+FROM builder AS production-dependencies
+RUN rm -rf node_modules apps/api/node_modules
+RUN npm ci --omit=dev --workspace @qingzhuan/api
+
+FROM node:22-bookworm-slim AS runtime
+ENV NODE_ENV=production \
+    PORT=4000
+WORKDIR /app
+
+COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
+COPY --from=production-dependencies --chown=node:node /app/apps/api/node_modules ./apps/api/node_modules
+COPY --from=builder --chown=node:node /app/apps/api/dist ./apps/api/dist
+COPY --from=builder --chown=node:node /app/apps/api/drizzle ./apps/api/drizzle
+COPY --from=builder --chown=node:node /app/apps/api/package.json ./apps/api/package.json
+
+WORKDIR /app/apps/api
+USER node
+EXPOSE 4000
+CMD ["node", "dist/main.js"]

@@ -7,6 +7,8 @@ function numberValue(value: unknown, fallback: number, name: string) {
 }
 
 export function validateConfig(input: Record<string, unknown>) {
+  const s3Endpoint = String(input.S3_ENDPOINT ?? "http://localhost:9000");
+
   return {
     ...input,
     PORT: numberValue(input.PORT, 4000, "PORT"),
@@ -16,7 +18,8 @@ export function validateConfig(input: Record<string, unknown>) {
         "postgresql://qingzhuan:qingzhuan@localhost:5432/qingzhuan",
     ),
     REDIS_URL: String(input.REDIS_URL ?? "redis://localhost:6379"),
-    S3_ENDPOINT: String(input.S3_ENDPOINT ?? "http://localhost:9000"),
+    S3_ENDPOINT: s3Endpoint,
+    S3_PUBLIC_ENDPOINT: String(input.S3_PUBLIC_ENDPOINT ?? s3Endpoint),
     S3_REGION: String(input.S3_REGION ?? "us-east-1"),
     S3_ACCESS_KEY_ID: String(input.S3_ACCESS_KEY_ID ?? "qingzhuan"),
     S3_SECRET_ACCESS_KEY: String(

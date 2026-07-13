@@ -11,8 +11,9 @@ import {
   ImageSquare,
   MagnifyingGlass,
   MusicNotes,
+  RocketLaunch,
+  Sparkle,
   SpinnerGap,
-  UploadSimple,
   VideoCamera,
   X,
 } from "@phosphor-icons/react";
@@ -147,6 +148,75 @@ function delay(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function PixelCursor() {
+  const dotRef = useRef<HTMLDivElement>(null);
+  const haloRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (!finePointer.matches || reducedMotion.matches) return;
+
+    let pointerX = -100;
+    let pointerY = -100;
+    let haloX = -100;
+    let haloY = -100;
+    let animationFrame = 0;
+
+    const draw = () => {
+      haloX += (pointerX - haloX) * 0.18;
+      haloY += (pointerY - haloY) * 0.18;
+      if (dotRef.current) {
+        dotRef.current.style.transform = `translate3d(${pointerX}px, ${pointerY}px, 0)`;
+      }
+      if (haloRef.current) {
+        haloRef.current.style.transform = `translate3d(${haloX}px, ${haloY}px, 0)`;
+      }
+      animationFrame = window.requestAnimationFrame(draw);
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      pointerX = event.clientX;
+      pointerY = event.clientY;
+      dotRef.current?.classList.add("is-visible");
+      haloRef.current?.classList.add("is-visible");
+      const interactive = (event.target as HTMLElement).closest(
+        "a, button, select, input, .drop-zone",
+      );
+      haloRef.current?.classList.toggle("is-active", Boolean(interactive));
+    };
+    const handlePointerOver = (event: PointerEvent) => {
+      const interactive = (event.target as HTMLElement).closest(
+        "a, button, select, input, .drop-zone",
+      );
+      haloRef.current?.classList.toggle("is-active", Boolean(interactive));
+    };
+    const handlePointerLeave = () => {
+      dotRef.current?.classList.remove("is-visible");
+      haloRef.current?.classList.remove("is-visible");
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, { passive: true });
+    document.addEventListener("pointerover", handlePointerOver, { passive: true });
+    document.documentElement.addEventListener("mouseleave", handlePointerLeave);
+    animationFrame = window.requestAnimationFrame(draw);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerover", handlePointerOver);
+      document.documentElement.removeEventListener("mouseleave", handlePointerLeave);
+    };
+  }, []);
+
+  return (
+    <div className="pixel-cursor" aria-hidden="true">
+      <div className="pixel-cursor-dot" ref={dotRef} />
+      <div className="pixel-cursor-halo" ref={haloRef} />
+    </div>
+  );
+}
+
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [sourceFormat, setSourceFormat] = useState("自动识别");
@@ -162,14 +232,25 @@ export default function Home() {
   const [scale, setScale] = useState(1);
   const [searchOpen, setSearchOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const [celebrating, setCelebrating] = useState(false);
   const [archiveState, setArchiveState] = useState<"idle" | "creating" | "ready" | "error">("idle");
   const [archiveDownloadUrl, setArchiveDownloadUrl] = useState("");
+  const previousStatusRef = useRef<ConversionStatus>("idle");
 
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), 2600);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    const previousStatus = previousStatusRef.current;
+    previousStatusRef.current = status;
+    if (previousStatus === "completed" || status !== "completed") return;
+    setCelebrating(true);
+    const timer = window.setTimeout(() => setCelebrating(false), 900);
+    return () => window.clearTimeout(timer);
+  }, [status]);
 
   const totalSize = useMemo(
     () => items.reduce((total, item) => total + item.file.size, 0),
@@ -443,7 +524,8 @@ export default function Home() {
           : "开始转换";
 
   return (
-    <main className="site-shell">
+    <main className={`site-shell status-${status}`}>
+      <PixelCursor />
       <header className="site-header">
         <a className="brand" href="#top" aria-label="轻转首页">
           轻转
@@ -486,6 +568,15 @@ export default function Home() {
       </header>
 
       <section className="hero" id="top">
+        {/* Generated pixel-art assets are decorative and intentionally bypass the vinext image proxy. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img className="pixel-star-field" src="/pixel/pixel-stars.png" alt="" aria-hidden="true" />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img className="pixel-horizon" src="/pixel/pixel-horizon.png" alt="" aria-hidden="true" />
+        {celebrating && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img className="completion-burst" src="/pixel/pixel-stars.png" alt="" aria-hidden="true" />
+        )}
         <div className="hero-inner">
           <div className="hero-copy">
             <h1>想把图片转成什么？</h1>
@@ -501,13 +592,13 @@ export default function Home() {
                 尺寸调整 <ArrowRight size={15} weight="bold" />
               </button>
             </div>
-            {/* This is a generated static asset; direct rendering avoids the vinext image proxy. */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              className="format-flow-art"
-              src="/format-flow-transparent.png"
-              alt="JPG、PNG 与 WebP 格式沿着转换路径流动"
-            />
+            <div className="format-orbit" aria-hidden="true">
+              <span className="format-chip chip-jpg">JPG</span>
+              <span className="format-chip chip-png">PNG</span>
+              <span className="format-chip chip-webp">WebP</span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className="pixel-rocket" src="/pixel/pixel-rocket.png" alt="" />
+            </div>
           </div>
 
           <div className="converter" id="converter">
@@ -547,6 +638,7 @@ export default function Home() {
 
             <div
               className={`drop-zone ${isDragging ? "is-dragging" : ""} ${items.length ? "has-files" : ""}`}
+              data-status={status}
               onDragEnter={(event) => {
                 event.preventDefault();
                 setIsDragging(true);
@@ -557,8 +649,9 @@ export default function Home() {
             >
               {!items.length ? (
                 <>
-                  <div className="upload-icon-wrap" aria-hidden="true">
-                    <UploadSimple size={46} weight="regular" />
+                  <div className="upload-mascot" aria-hidden="true">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/pixel/pixel-ufo.png" alt="" />
                   </div>
                   <button className="upload-button" type="button" onClick={() => inputRef.current?.click()}>
                     上传图片
@@ -633,6 +726,11 @@ export default function Home() {
                   </div>
                 </div>
               )}
+              <div className="pixel-hud" aria-hidden="true">
+                <strong>{status === "idle" ? "READY..." : status === "completed" ? "DONE!" : "WORKING..."}</strong>
+                <span className="hud-lives">◆ ◆ ◆</span>
+                <span className="hud-meter" />
+              </div>
             </div>
 
             {(qualityOpen || sizeOpen) && (
@@ -759,7 +857,7 @@ export default function Home() {
 
       <section className="popular-section" aria-labelledby="popular-title">
         <div className="section-inner">
-          <h2 id="popular-title">大家常用</h2>
+          <h2 id="popular-title"><RocketLaunch size={24} weight="fill" aria-hidden="true" />大家常用</h2>
           <div className="popular-grid">
             {popularConversions.map((item) => (
               <button key={`${item.from}-${item.to}`} type="button" onClick={() => choosePopular(item.from, item.to)}>
@@ -775,7 +873,7 @@ export default function Home() {
       <section className="tools-section" id="tools" aria-labelledby="tools-title">
         <div className="section-inner">
           <div className="section-heading-row">
-            <h2 id="tools-title">更多文件工具</h2>
+            <h2 id="tools-title"><Sparkle size={22} weight="fill" aria-hidden="true" />更多文件工具</h2>
             <button type="button" onClick={() => setToast("更多工具正在整理中")}>查看全部 <ArrowRight size={15} /></button>
           </div>
           <div className="tools-strip">

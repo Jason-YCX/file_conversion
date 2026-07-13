@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:integration": "node test/integration.mjs",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
-    "db:migrate": "tsx src/database/migrate.ts"
+    "db:migrate": "tsx src/database/migrate.ts",
+    "db:migrate:prod": "node dist/database/migrate.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.864.0",
