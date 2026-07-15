@@ -104,6 +104,14 @@ docker compose \
   config --quiet
 ```
 
+构建阶段的 `ffmpeg-static` 会额外下载平台对应的FFmpeg二进制。生产Compose默认通过以下配置使用国内镜像，避免服务器无法访问GitHub Releases时长期停在 `RUN npm ci`：
+
+```dotenv
+FFMPEG_BINARIES_URL=https://cdn.npmmirror.com/binaries/ffmpeg-static
+```
+
+该值只在构建Web和后端镜像时使用，不会进入最终运行容器。需要切换到其他可信镜像时，只修改 `.env.production` 中的这个变量。Docker构建中的 `npm ci` 已关闭audit和fund请求，减少无关的外网访问。
+
 确认DNS已经生效且三套证书已经放好后执行首次部署：
 
 ```bash

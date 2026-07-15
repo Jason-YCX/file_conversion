@@ -65,6 +65,8 @@ npm run infra:down
 - `.env.production.example`：不含真实密钥的生产环境模板
 - `scripts/`：部署、证书校验/热重载、健康检查、备份、恢复和应用镜像回滚
 
+生产镜像构建通过 `FFMPEG_BINARIES_URL` 下载 `ffmpeg-static` 所需的二进制文件，默认使用国内可访问的 npmmirror 地址；如部署网络可以稳定访问GitHub Releases，可在 `.env.production` 中覆盖该地址。Docker内执行的 `npm ci` 同时关闭审计和赞助请求，避免生产构建产生无关的额外网络访问。
+
 首次部署前，将 `.env.production.example` 复制为 `.env.production`，填写域名和随机密钥，并按 `certs/README.md` 放置三套腾讯云证书，然后运行：
 
 ```bash

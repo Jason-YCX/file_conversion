@@ -11,6 +11,7 @@
 - 前端采用复古像素宇宙视觉，动效直接映射现有上传和转换状态，触屏及减少动态效果模式自动降级。
 - 已补齐单服务器生产部署：Caddy、Web、API、Worker、PostgreSQL、Redis和MinIO由独立生产Compose统一编排。
 - 生产HTTPS使用三套腾讯云手动证书；部署前校验证书，替换后通过Caddy热重载生效。
+- 生产镜像构建通过可配置的 `FFMPEG_BINARIES_URL` 下载FFmpeg二进制，默认使用国内npmmirror地址，避免GitHub Releases不可达导致 `npm ci` 卡住。
 - 当前链路是 `上传 -> 对象存储 -> 数据库任务 -> conversion 队列 -> 转换 Worker -> 结果存储 -> 下载`。
 - 转换状态包含 `queued / processing / completed / failed / cancelled`，只有 `completed` 才能下载。
 

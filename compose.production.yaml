@@ -62,6 +62,7 @@ services:
       context: .
       dockerfile: Dockerfile.web
       args:
+        FFMPEG_BINARIES_URL: ${FFMPEG_BINARIES_URL:-https://cdn.npmmirror.com/binaries/ffmpeg-static}
         NEXT_PUBLIC_API_BASE_URL: https://${API_DOMAIN:?set API_DOMAIN in .env.production}/api/v1
     environment:
       HOST: 0.0.0.0
@@ -89,6 +90,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backend
+      args:
+        FFMPEG_BINARIES_URL: ${FFMPEG_BINARIES_URL:-https://cdn.npmmirror.com/binaries/ffmpeg-static}
     command: ["node", "dist/main.js"]
     environment: *backend-environment
     expose:
