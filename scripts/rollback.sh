@@ -17,9 +17,10 @@ if [[ -z "${target_release}" ]]; then
   echo "No rollback target recorded. Pass an image tag explicitly." >&2
   exit 1
 fi
-
-docker image inspect "qingzhuan-web:${target_release}" >/dev/null
-docker image inspect "qingzhuan-backend:${target_release}" >/dev/null
+if [[ ! "${target_release}" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Rollback target must be a full 40-character Git commit SHA." >&2
+  exit 1
+fi
 
 current_release=""
 if [[ -f "${current_file}" ]]; then
@@ -31,6 +32,8 @@ echo "Backing up PostgreSQL before application rollback..."
 "${SCRIPT_DIR}/check-certificates.sh"
 
 export APP_VERSION="${target_release}"
+echo "Pulling rollback release ${target_release} from Tencent TCR..."
+compose --profile tools pull web api worker migrate
 compose up -d --no-build web api worker caddy
 
 if ! "${SCRIPT_DIR}/healthcheck.sh"; then
@@ -40,9 +43,13 @@ if ! "${SCRIPT_DIR}/healthcheck.sh"; then
   exit 1
 fi
 
-if [[ -n "${current_release}" && "${current_release}" != "${target_release}" ]]; then
+if [[ "${current_release}" =~ ^[0-9a-f]{40}$ && "${current_release}" != "${target_release}" ]]; then
   printf '%s\n' "${current_release}" >"${previous_file}"
 fi
 printf '%s\n' "${target_release}" >"${current_file}"
+
+if ! "${SCRIPT_DIR}/cleanup-images.sh"; then
+  echo "Warning: application image cleanup did not complete." >&2
+fi
 
 echo "Application rollback completed: ${target_release}"

@@ -11,7 +11,8 @@
 - 前端采用复古像素宇宙视觉，动效直接映射现有上传和转换状态，触屏及减少动态效果模式自动降级。
 - 已补齐单服务器生产部署：Caddy、Web、API、Worker、PostgreSQL、Redis和MinIO由独立生产Compose统一编排。
 - 生产HTTPS使用三套腾讯云手动证书；部署前校验证书，替换后通过Caddy热重载生效。
-- 生产镜像构建通过可配置的 `FFMPEG_BINARIES_URL` 下载FFmpeg二进制，默认使用国内npmmirror地址，避免GitHub Releases不可达导致 `npm ci` 卡住。
+- 生产镜像由GitHub Actions构建并以完整Git SHA推送到腾讯云TCR；服务器只拉取镜像，不执行 `npm ci` 或前后端编译。
+- 2核4G服务器的生产转换与归档并发默认均为1；部署后只保留当前和上一版应用镜像，回滚缺失镜像时从TCR重新拉取。
 - 当前链路是 `上传 -> 对象存储 -> 数据库任务 -> conversion 队列 -> 转换 Worker -> 结果存储 -> 下载`。
 - 转换状态包含 `queued / processing / completed / failed / cancelled`，只有 `completed` 才能下载。
 
@@ -41,8 +42,9 @@
 
 - 完整本地环境：`npm run dev:full`
 - 单独运行转换 Worker：`npm run dev:worker`
-- 首次生产部署：`SKIP_GIT_PULL=1 npm run deploy:prod`
-- 后续生产更新：`npm run deploy:prod`
+- 生产发布：在GitHub Actions手动运行 `Deploy production`
+- 已构建SHA的服务器手动补发：`APP_VERSION=完整Git提交SHA SKIP_GIT_PULL=1 npm run deploy:prod`
+- 生产应用镜像清理：`npm run cleanup:prod`
 - 生产证书校验/重载：`npm run certs:check` / `npm run certs:reload`
 - 生产配置、备份、恢复和回滚：读取 `docs/deployment.md`。
 - 修改完成后不要主动启动项目；默认复用用户已经启动的服务，启动动作交给用户执行。

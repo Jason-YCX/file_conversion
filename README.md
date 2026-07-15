@@ -59,24 +59,20 @@ npm run infra:down
 
 - `Dockerfile.web`：构建Vinext standalone前端镜像
 - `Dockerfile.backend`：构建NestJS API和转换Worker共用镜像
-- `compose.production.yaml`：编排Caddy、Web、API、Worker、PostgreSQL、Redis和MinIO
+- `compose.production.yaml`：从腾讯云TCR拉取应用镜像，并编排Caddy、Web、API、Worker、PostgreSQL、Redis和MinIO
 - `Caddyfile`：为前端、API和对象存储域名提供HTTPS与反向代理
 - `certs/`：约定三套腾讯云手动证书的目录和固定文件名
 - `.env.production.example`：不含真实密钥的生产环境模板
-- `scripts/`：部署、证书校验/热重载、健康检查、备份、恢复和应用镜像回滚
+- `scripts/`：部署、镜像清理、证书校验/热重载、健康检查、备份、恢复和应用镜像回滚
 
-生产镜像构建通过 `FFMPEG_BINARIES_URL` 下载 `ffmpeg-static` 所需的二进制文件，默认使用国内可访问的 npmmirror 地址；如部署网络可以稳定访问GitHub Releases，可在 `.env.production` 中覆盖该地址。Docker内执行的 `npm ci` 同时关闭审计和赞助请求，避免生产构建产生无关的额外网络访问。
+生产镜像不再由服务器现场构建。GitHub Actions完成检查后，在GitHub Runner中分别构建Web和Backend镜像，以完整Git提交SHA为版本推送到腾讯云TCR；服务器只拉取对应SHA并启动。构建时 `ffmpeg-static` 使用npmmirror，Docker内的 `npm ci` 关闭audit和fund请求。
 
-首次部署前，将 `.env.production.example` 复制为 `.env.production`，填写域名和随机密钥，并按 `certs/README.md` 放置三套腾讯云证书，然后运行：
+首次部署前，将 `.env.production.example` 复制为 `.env.production`，填写域名和随机密钥，登录TCR，并按 `certs/README.md` 放置三套腾讯云证书。生产发布通过GitHub Actions手动运行 `Deploy production`，服务器不会执行依赖安装或项目编译。
 
-```bash
-SKIP_GIT_PULL=1 ./scripts/deploy.sh
-```
-
-后续服务器更新运行：
+GitHub Actions构建成功后的服务器手动补发命令为：
 
 ```bash
-./scripts/deploy.sh
+APP_VERSION=完整Git提交SHA SKIP_GIT_PULL=1 ./scripts/deploy.sh
 ```
 
 生产环境将MinIO内部读写地址与浏览器签名地址分开；只有Caddy的80/443端口对公网开放，PostgreSQL、Redis、MinIO控制台、Web和API端口均只在Docker网络内使用。完整服务器准备、DNS、GitHub手动发布、备份与回滚说明见 [`docs/deployment.md`](docs/deployment.md)。
@@ -92,7 +88,7 @@ SKIP_GIT_PULL=1 ./scripts/deploy.sh
 - `GET /api/v1/archives/:id`：查询打包任务状态
 - `GET /api/v1/archives/:id/download`：下载已完成的 ZIP
 
-默认只接受图片，单文件上限 50MB、4000 万像素，前端一次最多添加10个文件并以最多3路并发上传。转换并发默认为2，单任务超时180秒。
+默认只接受图片，单文件上限 50MB、4000 万像素，前端一次最多添加10个文件并以最多3路并发上传。本地转换并发默认为2，2核4G生产服务器固定从1路起步，单任务超时180秒。
 
 所有对象存储文件统一保留2小时：原始上传位于 `uploads/`，转换结果位于 `converted/`，批量压缩包位于 `archives/`。清理后任务状态变为 `expired`，下载接口返回 `410 FILE_EXPIRED`；数据库任务记录继续保留用于说明过期原因。
 

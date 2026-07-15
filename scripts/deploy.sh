@@ -14,10 +14,12 @@ if [[ "${SKIP_GIT_PULL:-0}" != "1" ]]; then
   git pull --ff-only
 fi
 
+requested_release="${APP_VERSION:-}"
+
 # shellcheck source=./production-common.sh
 source "${SCRIPT_DIR}/production-common.sh"
 
-release="${APP_VERSION:-$(git rev-parse --short=12 HEAD)}"
+release="${requested_release:-$(git rev-parse HEAD)}"
 export APP_VERSION="${release}"
 
 mkdir -p "${PROJECT_ROOT}/.deploy"
@@ -32,8 +34,8 @@ echo "Validating production configuration..."
 compose config --quiet
 "${SCRIPT_DIR}/check-certificates.sh"
 
-echo "Building release ${release}..."
-compose build --pull web api
+echo "Pulling release ${release} from Tencent TCR..."
+compose --profile tools pull web api worker migrate
 
 echo "Starting production infrastructure..."
 compose up -d postgres redis minio minio-init
@@ -45,7 +47,7 @@ echo "Applying database migrations..."
 compose --profile tools run --rm migrate
 
 echo "Updating application services..."
-compose up -d --remove-orphans web api worker caddy
+compose up -d --no-build --remove-orphans web api worker caddy
 
 if ! "${SCRIPT_DIR}/healthcheck.sh"; then
   compose ps >&2
@@ -54,9 +56,17 @@ if ! "${SCRIPT_DIR}/healthcheck.sh"; then
   exit 1
 fi
 
-if [[ -n "${current_release}" && "${current_release}" != "${release}" ]]; then
-  printf '%s\n' "${current_release}" >"${previous_file}"
+if [[ "${current_release}" != "${release}" ]]; then
+  if [[ "${current_release}" =~ ^[0-9a-f]{40}$ ]]; then
+    printf '%s\n' "${current_release}" >"${previous_file}"
+  else
+    rm -f "${previous_file}"
+  fi
 fi
 printf '%s\n' "${release}" >"${current_file}"
+
+if ! "${SCRIPT_DIR}/cleanup-images.sh"; then
+  echo "Warning: application image cleanup did not complete." >&2
+fi
 
 echo "Production deployment completed: ${release}"

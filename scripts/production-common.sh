@@ -21,6 +21,16 @@ set +a
 : "${APP_DOMAIN:?APP_DOMAIN is required in .env.production}"
 : "${API_DOMAIN:?API_DOMAIN is required in .env.production}"
 : "${FILES_DOMAIN:?FILES_DOMAIN is required in .env.production}"
+: "${TCR_REGISTRY:?TCR_REGISTRY is required in .env.production}"
+: "${TCR_NAMESPACE:?TCR_NAMESPACE is required in .env.production}"
+: "${WEB_IMAGE:?WEB_IMAGE is required in .env.production}"
+: "${BACKEND_IMAGE:?BACKEND_IMAGE is required in .env.production}"
+
+current_release_file="${PROJECT_ROOT}/.deploy/current"
+if [[ -z "${APP_VERSION:-}" && -s "${current_release_file}" ]]; then
+  APP_VERSION="$(<"${current_release_file}")"
+  export APP_VERSION
+fi
 
 compose() {
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" "$@"

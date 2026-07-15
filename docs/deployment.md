@@ -1,6 +1,6 @@
 # 生产部署
 
-本文档描述将轻转的前端、API、转换 Worker、PostgreSQL、Redis、MinIO和Caddy全部部署到同一台Linux服务器的流程。生产环境使用独立的 `compose.production.yaml`，不复用会向宿主机暴露基础设施端口的本地 `compose.yaml`。
+本文档描述将轻转的前端、API、转换 Worker、PostgreSQL、Redis、MinIO和Caddy全部部署到同一台Linux服务器的流程。GitHub Actions负责构建应用镜像并推送腾讯云TCR，生产服务器只拉取镜像和运行容器；生产环境使用独立的 `compose.production.yaml`，不复用会向宿主机暴露基础设施端口的本地 `compose.yaml`。
 
 ## 部署结构
 
@@ -16,7 +16,7 @@
 
 ## 服务器准备
 
-建议从4核CPU、8GB内存、100GB SSD的Ubuntu LTS服务器起步。安装Git、curl、OpenSSL、Docker Engine和Docker Compose插件，并确认：
+公开服务仍建议从4核CPU、8GB内存、100GB SSD的Ubuntu LTS服务器起步。2核4GB服务器适合低并发起步，但必须由GitHub Actions完成镜像构建，生产转换与归档并发保持为1，并建议在宿主机配置2GB Swap。安装Git、curl、OpenSSL、Docker Engine和Docker Compose插件，并确认：
 
 ```bash
 docker version
@@ -47,10 +47,10 @@ qingzhuan-files.jason-ycx.top
 将仓库放在固定目录：
 
 ```bash
-sudo mkdir -p /opt/qingzhuan
-sudo chown "$USER":"$USER" /opt/qingzhuan
-git clone git@github.com:Jason-YCX/file_conversion.git /opt/qingzhuan
-cd /opt/qingzhuan
+sudo mkdir -p /usr/local/projects/file_conversion
+sudo chown "$USER":"$USER" /usr/local/projects/file_conversion
+git clone git@github.com:Jason-YCX/file_conversion.git /usr/local/projects/file_conversion
+cd /usr/local/projects/file_conversion
 ```
 
 创建生产环境文件：
@@ -63,8 +63,17 @@ chmod 600 .env.production
 编辑 `.env.production`：
 
 1. 确认前端、API和文件域名与当前DNS解析一致；如需换域名再修改。
-2. 为PostgreSQL、Redis和MinIO分别设置不同的随机密码。
-3. 密码建议使用 `openssl rand -hex 24` 生成，避免URL中需要额外编码的特殊字符。
+2. 确认TCR配置为 `ccr.ccs.tencentyun.com/jason-docker`，Web和Backend仓库名称与控制台一致。
+3. 为PostgreSQL、Redis和MinIO分别设置不同的随机密码。
+4. 密码建议使用 `openssl rand -hex 24` 生成，避免URL中需要额外编码的特殊字符。
+
+服务器需要登录TCR才能拉取私有镜像：
+
+```bash
+docker login --username 你的TCR用户名 ccr.ccs.tencentyun.com
+```
+
+输入TCR访问密码并确认出现 `Login Succeeded`。该凭据只用于服务器拉取镜像，不要写入仓库或 `.env.production`。
 
 ## 腾讯云手动证书
 
@@ -93,35 +102,36 @@ chmod 644 certs/*/cert.pem
 npm run certs:check
 ```
 
-部署脚本也会在构建前自动执行相同校验。证书至少需要剩余7天有效期，否则部署会停止。
+部署脚本也会在拉取应用镜像前自动执行相同校验。证书至少需要剩余7天有效期，否则部署会停止。
 
 先检查配置能否解析：
 
 ```bash
-docker compose \
+APP_VERSION="$(git rev-parse HEAD)" docker compose \
   --env-file .env.production \
   -f compose.production.yaml \
   config --quiet
 ```
 
-构建阶段的 `ffmpeg-static` 会额外下载平台对应的FFmpeg二进制。生产Compose默认通过以下配置使用国内镜像，避免服务器无法访问GitHub Releases时长期停在 `RUN npm ci`：
+生产服务器不再执行Docker构建。GitHub Actions在 `linux/amd64` Runner中使用 `Dockerfile.web` 和 `Dockerfile.backend` 构建两个镜像，并以完整Git提交SHA推送：
 
-```dotenv
-FFMPEG_BINARIES_URL=https://cdn.npmmirror.com/binaries/ffmpeg-static
+```text
+ccr.ccs.tencentyun.com/jason-docker/file-conversion-web:<完整Git SHA>
+ccr.ccs.tencentyun.com/jason-docker/file-conversion-backend:<完整Git SHA>
 ```
 
-该值只在构建Web和后端镜像时使用，不会进入最终运行容器。需要切换到其他可信镜像时，只修改 `.env.production` 中的这个变量。Docker构建中的 `npm ci` 已关闭audit和fund请求，减少无关的外网访问。
+API、Worker和数据库迁移共用Backend镜像。GitHub构建阶段通过npmmirror下载 `ffmpeg-static` 二进制，并使用Buildx缓存加速后续发布；该下载地址不会进入最终运行容器环境。
 
-确认DNS已经生效且三套证书已经放好后执行首次部署：
+确认DNS、TCR登录、生产环境变量和三套证书全部准备好后，在GitHub仓库的Actions页面手动运行 `Deploy production`。如镜像已经由工作流成功推送，也可以在服务器补发指定SHA：
 
 ```bash
-SKIP_GIT_PULL=1 ./scripts/deploy.sh
+APP_VERSION=完整Git提交SHA SKIP_GIT_PULL=1 ./scripts/deploy.sh
 ```
 
 部署脚本会依次完成：
 
 1. 校验Compose配置和三套HTTPS证书。
-2. 构建带Git提交标签的前端和后端镜像。
+2. 从TCR拉取工作流已经构建的前端和后端SHA镜像。
 3. 启动PostgreSQL、Redis和MinIO。
 4. 在迁移前备份数据库。
 5. 执行Drizzle迁移。
@@ -149,20 +159,22 @@ https://qingzhuan-api.jason-ycx.top/docs
 
 ## 日常更新
 
-服务器手动更新只需要：
+日常更新默认在GitHub Actions中手动运行 `Deploy production`。如果工作流已经完成镜像构建和推送，只需在服务器补发指定SHA：
 
 ```bash
-cd /opt/qingzhuan
-./scripts/deploy.sh
+cd /usr/local/projects/file_conversion
+git pull --ff-only
+APP_VERSION=完整Git提交SHA SKIP_GIT_PULL=1 ./scripts/deploy.sh
 ```
 
-脚本拒绝覆盖服务器上的已跟踪改动，通过 `git pull --ff-only` 拉取代码，只重新构建和更新Web、API、Worker；PostgreSQL、Redis和MinIO数据卷不会删除。Worker预留210秒优雅退出时间，覆盖当前180秒转换超时。
+GitHub工作流拒绝部署服务器上的已跟踪改动，通过 `git pull --ff-only` 拉取配置，并核对服务器HEAD与本次构建SHA完全一致。部署脚本只拉取和更新Web、API、Worker；PostgreSQL、Redis和MinIO数据卷不会删除。Worker预留210秒优雅退出时间，覆盖当前180秒转换超时。
 
 不要执行以下命令：
 
 ```bash
 docker compose down -v
 docker volume prune
+docker system prune -a
 ```
 
 它们可能删除生产数据卷。
@@ -177,7 +189,7 @@ docker volume prune
 4. 分别用浏览器检查三个HTTPS域名的证书有效期。
 
 ```bash
-cd /opt/qingzhuan
+cd /usr/local/projects/file_conversion
 npm run certs:check
 npm run certs:reload
 ```
@@ -186,7 +198,7 @@ npm run certs:reload
 
 ## GitHub手动发布
 
-`.github/workflows/deploy-production.yml` 提供“先测试、后SSH部署”的手动工作流。首次使用前，在GitHub的 `production` Environment中配置：
+`.github/workflows/deploy-production.yml` 提供“检查、构建推送、SSH部署”的手动工作流。首次使用前，在GitHub的 `production` Environment中配置Secrets：
 
 ```text
 PRODUCTION_HOST
@@ -194,20 +206,35 @@ PRODUCTION_USER
 PRODUCTION_PORT
 PRODUCTION_SSH_PRIVATE_KEY
 PRODUCTION_SSH_KNOWN_HOSTS
+TCR_USERNAME
+TCR_PASSWORD
 ```
 
 - `PRODUCTION_SSH_PRIVATE_KEY`：GitHub Actions登录服务器使用的专用私钥。
 - `PRODUCTION_SSH_KNOWN_HOSTS`：提前在可信网络执行 `ssh-keyscan -H 服务器地址` 得到的主机指纹。
+- `TCR_USERNAME`、`TCR_PASSWORD`：GitHub Runner登录TCR并推送私有镜像使用的凭据。
 - 服务器还需要配置仓库只读Deploy Key，使 `git pull` 可以读取私有仓库。
 
-配置完成后，在GitHub Actions中手动运行 `Deploy production`。工作流只有在 `npm run lint` 和 `npm test` 全部通过后才会连接服务器执行部署。默认不在推送main时自动上线，避免服务器尚未准备好时误部署。
+同一Environment中配置Variables：
+
+```text
+TCR_REGISTRY=ccr.ccs.tencentyun.com
+TCR_NAMESPACE=jason-docker
+WEB_IMAGE=file-conversion-web
+BACKEND_IMAGE=file-conversion-backend
+DOCKER_PLATFORM=linux/amd64
+PRODUCTION_API_BASE_URL=https://qingzhuan-api.jason-ycx.top/api/v1
+PRODUCTION_PROJECT_DIR=/usr/local/projects/file_conversion
+```
+
+配置完成后，在GitHub Actions中手动运行 `Deploy production`。工作流先执行 `npm run lint` 和 `npm test`，再顺序构建和推送Web、Backend镜像，最后连接服务器拉取相同SHA并部署。任一构建或推送失败都不会连接服务器；默认不在推送main时自动上线。
 
 ## 日志和状态
 
 ```bash
-docker compose --env-file .env.production -f compose.production.yaml ps
-docker compose --env-file .env.production -f compose.production.yaml logs -f web api worker
-docker compose --env-file .env.production -f compose.production.yaml logs -f caddy
+APP_VERSION="$(cat .deploy/current)" docker compose --env-file .env.production -f compose.production.yaml ps
+APP_VERSION="$(cat .deploy/current)" docker compose --env-file .env.production -f compose.production.yaml logs -f web api worker
+APP_VERSION="$(cat .deploy/current)" docker compose --env-file .env.production -f compose.production.yaml logs -f caddy
 ```
 
 容器日志限制为每个文件10MB、最多5个文件，防止长期运行占满磁盘。仍需监控服务器磁盘、内存、CPU以及 `/api/v1/health`。
@@ -232,19 +259,19 @@ CONFIRM_RESTORE=yes ./scripts/restore.sh backups/qingzhuan-时间.dump
 
 ## 应用回滚
 
-部署脚本保留当前和上一个Git提交标签。新版本异常时运行：
+部署脚本保留当前和上一个完整Git提交SHA。新版本异常时运行：
 
 ```bash
 ./scripts/rollback.sh
 ```
 
-也可以指定本机仍然存在的镜像标签：
+也可以指定TCR中仍然存在的完整Git提交SHA：
 
 ```bash
-./scripts/rollback.sh 0123456789ab
+./scripts/rollback.sh 0123456789abcdef0123456789abcdef01234567
 ```
 
-回滚脚本只切换Web、API和Worker镜像，不自动回滚数据库结构。因此数据库迁移必须优先采用向后兼容的新增字段、先扩展后收缩策略。
+回滚脚本先从TCR拉取目标SHA，因此本机旧镜像被清理后仍可回滚。它只切换Web、API和Worker镜像，不自动回滚数据库结构；数据库迁移必须优先采用向后兼容的新增字段、先扩展后收缩策略。首次从旧的服务器构建方式切换到TCR时没有可用的上一版TCR镜像，完成第二次TCR发布后才会形成自动回滚目标。
 
 ## 数据位置和清理
 
@@ -259,3 +286,11 @@ minio-data
 ```
 
 原始上传、转换结果和ZIP仍只保留2小时，由Worker启动时及每10分钟清理。数据库任务记录继续保留，用于向用户说明文件已经过期。
+
+每次成功部署或回滚后，`scripts/cleanup-images.sh` 会删除本机更旧的Web和Backend镜像，只保留 `.deploy/current` 与 `.deploy/previous` 对应的两个版本，并清理悬空镜像层。也可以手动运行：
+
+```bash
+npm run cleanup:prod
+```
+
+该脚本不会删除TCR远程标签、数据库卷、Redis卷或MinIO卷。TCR个人版建议在控制台保留最近10至20个SHA版本，再手动删除更旧标签，避免给GitHub Actions授予远程删除权限。

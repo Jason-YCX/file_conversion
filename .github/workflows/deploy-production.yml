@@ -13,9 +13,11 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      FFMPEG_BINARIES_URL: https://cdn.npmmirror.com/binaries/ffmpeg-static
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -24,7 +26,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Run static checks
         run: npm run lint
@@ -32,19 +34,86 @@ jobs:
       - name: Run tests
         run: npm test
 
-  deploy:
+  release:
     needs: validate
     runs-on: ubuntu-latest
     environment: production
+    env:
+      TCR_REGISTRY: ${{ vars.TCR_REGISTRY }}
+      TCR_NAMESPACE: ${{ vars.TCR_NAMESPACE }}
+      WEB_IMAGE: ${{ vars.WEB_IMAGE }}
+      BACKEND_IMAGE: ${{ vars.BACKEND_IMAGE }}
+      DOCKER_PLATFORM: ${{ vars.DOCKER_PLATFORM }}
+      PRODUCTION_API_BASE_URL: ${{ vars.PRODUCTION_API_BASE_URL }}
+      PRODUCTION_PROJECT_DIR: ${{ vars.PRODUCTION_PROJECT_DIR }}
+      FFMPEG_BINARIES_URL: https://cdn.npmmirror.com/binaries/ffmpeg-static
     steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Validate release configuration
+        run: |
+          required=(
+            TCR_REGISTRY
+            TCR_NAMESPACE
+            WEB_IMAGE
+            BACKEND_IMAGE
+            DOCKER_PLATFORM
+            PRODUCTION_API_BASE_URL
+            PRODUCTION_PROJECT_DIR
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing production environment variable: ${name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Tencent TCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.TCR_REGISTRY }}
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_PASSWORD }}
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile.web
+          platforms: ${{ env.DOCKER_PLATFORM }}
+          push: true
+          tags: ${{ env.TCR_REGISTRY }}/${{ env.TCR_NAMESPACE }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
+          build-args: |
+            FFMPEG_BINARIES_URL=${{ env.FFMPEG_BINARIES_URL }}
+            NEXT_PUBLIC_API_BASE_URL=${{ env.PRODUCTION_API_BASE_URL }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          platforms: ${{ env.DOCKER_PLATFORM }}
+          push: true
+          tags: ${{ env.TCR_REGISTRY }}/${{ env.TCR_NAMESPACE }}/${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+          build-args: |
+            FFMPEG_BINARIES_URL=${{ env.FFMPEG_BINARIES_URL }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
       - name: Configure production SSH key
         env:
           SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
         run: |
           install -d -m 700 ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/qingzhuan_production
-          chmod 600 ~/.ssh/qingzhuan_production
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/github_actions_production
+          chmod 600 ~/.ssh/github_actions_production
           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
@@ -53,9 +122,15 @@ jobs:
           PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
           PRODUCTION_PORT: ${{ secrets.PRODUCTION_PORT }}
+          RELEASE: ${{ github.sha }}
         run: |
+          printf -v remote_command \
+            'cd %q && git diff --quiet && git diff --cached --quiet && git pull --ff-only && test "$(git rev-parse HEAD)" = %q && SKIP_GIT_PULL=1 APP_VERSION=%q ./scripts/deploy.sh' \
+            "$PRODUCTION_PROJECT_DIR" \
+            "$RELEASE" \
+            "$RELEASE"
           ssh \
-            -i ~/.ssh/qingzhuan_production \
+            -i ~/.ssh/github_actions_production \
             -p "${PRODUCTION_PORT:-22}" \
             "$PRODUCTION_USER@$PRODUCTION_HOST" \
-            'cd /opt/qingzhuan && ./scripts/deploy.sh'
+            "$remote_command"

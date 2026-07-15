@@ -21,7 +21,7 @@ x-backend-environment: &backend-environment
   UPLOAD_URL_EXPIRES_SECONDS: ${UPLOAD_URL_EXPIRES_SECONDS:-900}
   MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-52428800}
   DOWNLOAD_URL_EXPIRES_SECONDS: ${DOWNLOAD_URL_EXPIRES_SECONDS:-900}
-  CONVERSION_WORKER_CONCURRENCY: ${CONVERSION_WORKER_CONCURRENCY:-2}
+  CONVERSION_WORKER_CONCURRENCY: ${CONVERSION_WORKER_CONCURRENCY:-1}
   ARCHIVE_WORKER_CONCURRENCY: ${ARCHIVE_WORKER_CONCURRENCY:-1}
   CONVERSION_TIMEOUT_MS: ${CONVERSION_TIMEOUT_MS:-180000}
   MAX_INPUT_PIXELS: ${MAX_INPUT_PIXELS:-40000000}
@@ -57,13 +57,7 @@ services:
       - app-network
 
   web:
-    image: qingzhuan-web:${APP_VERSION:-local}
-    build:
-      context: .
-      dockerfile: Dockerfile.web
-      args:
-        FFMPEG_BINARIES_URL: ${FFMPEG_BINARIES_URL:-https://cdn.npmmirror.com/binaries/ffmpeg-static}
-        NEXT_PUBLIC_API_BASE_URL: https://${API_DOMAIN:?set API_DOMAIN in .env.production}/api/v1
+    image: ${TCR_REGISTRY:?set TCR_REGISTRY}/${TCR_NAMESPACE:?set TCR_NAMESPACE}/${WEB_IMAGE:-file-conversion-web}:${APP_VERSION:-unreleased}
     environment:
       HOST: 0.0.0.0
       PORT: "3000"
@@ -86,12 +80,7 @@ services:
       - app-network
 
   api:
-    image: qingzhuan-backend:${APP_VERSION:-local}
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-      args:
-        FFMPEG_BINARIES_URL: ${FFMPEG_BINARIES_URL:-https://cdn.npmmirror.com/binaries/ffmpeg-static}
+    image: ${TCR_REGISTRY:?set TCR_REGISTRY}/${TCR_NAMESPACE:?set TCR_NAMESPACE}/${BACKEND_IMAGE:-file-conversion-backend}:${APP_VERSION:-unreleased}
     command: ["node", "dist/main.js"]
     environment: *backend-environment
     expose:
@@ -120,7 +109,7 @@ services:
       - app-network
 
   worker:
-    image: qingzhuan-backend:${APP_VERSION:-local}
+    image: ${TCR_REGISTRY:?set TCR_REGISTRY}/${TCR_NAMESPACE:?set TCR_NAMESPACE}/${BACKEND_IMAGE:-file-conversion-backend}:${APP_VERSION:-unreleased}
     command: ["node", "dist/worker.js"]
     environment: *backend-environment
     depends_on: *backend-dependencies
@@ -132,7 +121,7 @@ services:
       - app-network
 
   migrate:
-    image: qingzhuan-backend:${APP_VERSION:-local}
+    image: ${TCR_REGISTRY:?set TCR_REGISTRY}/${TCR_NAMESPACE:?set TCR_NAMESPACE}/${BACKEND_IMAGE:-file-conversion-backend}:${APP_VERSION:-unreleased}
     command: ["node", "dist/database/migrate.js"]
     environment: *backend-environment
     depends_on:
