@@ -59,11 +59,11 @@ npm run infra:down
 
 - `Dockerfile.web`：构建Vinext standalone前端镜像
 - `Dockerfile.backend`：构建NestJS API和转换Worker共用镜像
-- `compose.production.yaml`：从腾讯云TCR拉取应用镜像，并编排Caddy、Web、API、Worker、PostgreSQL、Redis和MinIO
-- `Caddyfile`：为前端、API和对象存储域名提供HTTPS与反向代理
+- `compose.production.yaml`：从腾讯云TCR拉取应用镜像，并编排Web、API、Worker、PostgreSQL、Redis和MinIO
+- `nginx/file-conversion.conf.template`：由服务器现有Nginx接管三个域名的HTTPS与反向代理
 - `certs/`：约定三套腾讯云手动证书的目录和固定文件名
 - `.env.production.example`：不含真实密钥的生产环境模板
-- `scripts/`：部署、镜像清理、证书校验/热重载、健康检查、备份、恢复和应用镜像回滚
+- `scripts/`：部署、Nginx站点安装、镜像清理、证书校验/热重载、健康检查、备份、恢复和应用镜像回滚
 
 生产镜像不再由服务器现场构建。GitHub Actions完成检查后，在GitHub Runner中分别构建Web和Backend镜像，以完整Git提交SHA为版本推送到腾讯云TCR；服务器只拉取对应SHA并启动。构建时 `ffmpeg-static` 使用npmmirror，Docker内的 `npm ci` 关闭audit和fund请求。
 
@@ -75,7 +75,7 @@ GitHub Actions构建成功后的服务器手动补发命令为：
 APP_VERSION=完整Git提交SHA SKIP_GIT_PULL=1 ./scripts/deploy.sh
 ```
 
-生产环境将MinIO内部读写地址与浏览器签名地址分开；只有Caddy的80/443端口对公网开放，PostgreSQL、Redis、MinIO控制台、Web和API端口均只在Docker网络内使用。完整服务器准备、DNS、GitHub手动发布、备份与回滚说明见 [`docs/deployment.md`](docs/deployment.md)。
+生产环境将MinIO内部读写地址与浏览器签名地址分开；宿主机现有Nginx是唯一的80/443公网入口，Web、API和MinIO API仅绑定 `127.0.0.1:13000/14000/19000`，PostgreSQL、Redis和MinIO控制台不开放宿主机端口。部署脚本会安全生成站点配置，执行 `nginx -t` 后才热重载，不会覆盖其他网站配置。完整服务器准备、DNS、GitHub手动发布、备份与回滚说明见 [`docs/deployment.md`](docs/deployment.md)。
 
 ## API
 

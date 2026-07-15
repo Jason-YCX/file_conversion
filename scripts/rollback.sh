@@ -34,11 +34,12 @@ echo "Backing up PostgreSQL before application rollback..."
 export APP_VERSION="${target_release}"
 echo "Pulling rollback release ${target_release} from Tencent TCR..."
 compose --profile tools pull web api worker migrate
-compose up -d --no-build web api worker caddy
+compose up -d --no-build --remove-orphans web api worker
+"${SCRIPT_DIR}/install-nginx-site.sh"
 
 if ! "${SCRIPT_DIR}/healthcheck.sh"; then
   compose ps >&2
-  compose logs --tail=100 web api worker caddy >&2
+  compose logs --tail=100 web api worker >&2
   echo "Rollback target did not pass health checks." >&2
   exit 1
 fi

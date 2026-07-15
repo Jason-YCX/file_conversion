@@ -26,6 +26,12 @@ set +a
 : "${WEB_IMAGE:?WEB_IMAGE is required in .env.production}"
 : "${BACKEND_IMAGE:?BACKEND_IMAGE is required in .env.production}"
 
+WEB_HOST_PORT="${WEB_HOST_PORT:-13000}"
+API_HOST_PORT="${API_HOST_PORT:-14000}"
+MINIO_HOST_PORT="${MINIO_HOST_PORT:-19000}"
+MAX_UPLOAD_BYTES="${MAX_UPLOAD_BYTES:-52428800}"
+export WEB_HOST_PORT API_HOST_PORT MINIO_HOST_PORT MAX_UPLOAD_BYTES
+
 current_release_file="${PROJECT_ROOT}/.deploy/current"
 if [[ -z "${APP_VERSION:-}" && -s "${current_release_file}" ]]; then
   APP_VERSION="$(<"${current_release_file}")"

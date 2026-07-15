@@ -30,7 +30,13 @@ chmod 644 certs/*/cert.pem
 npm run certs:check
 ```
 
-Caddy已经运行时，热重载新证书：
+首次部署时，部署脚本会自动安装Nginx站点；也可以手动执行：
+
+```bash
+npm run nginx:install
+```
+
+宿主机Nginx站点已经安装后，校验配置并热重载新证书：
 
 ```bash
 npm run certs:reload

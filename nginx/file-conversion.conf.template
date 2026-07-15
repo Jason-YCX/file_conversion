@@ -1,0 +1,78 @@
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __APP_DOMAIN__ __API_DOMAIN__ __FILES_DOMAIN__;
+
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name __APP_DOMAIN__;
+
+    ssl_certificate "__PROJECT_ROOT__/certs/qingzhuan/cert.pem";
+    ssl_certificate_key "__PROJECT_ROOT__/certs/qingzhuan/key.pem";
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:__WEB_HOST_PORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name __API_DOMAIN__;
+
+    ssl_certificate "__PROJECT_ROOT__/certs/qingzhuan-api/cert.pem";
+    ssl_certificate_key "__PROJECT_ROOT__/certs/qingzhuan-api/key.pem";
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    location / {
+        proxy_pass http://127.0.0.1:__API_HOST_PORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name __FILES_DOMAIN__;
+
+    ssl_certificate "__PROJECT_ROOT__/certs/qingzhuan-files/cert.pem";
+    ssl_certificate_key "__PROJECT_ROOT__/certs/qingzhuan-files/key.pem";
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    client_max_body_size __MAX_UPLOAD_BYTES__;
+
+    location / {
+        proxy_pass http://127.0.0.1:__MINIO_HOST_PORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+    }
+}

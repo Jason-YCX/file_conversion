@@ -9,8 +9,8 @@
 
 - 已完成：浏览器签名直传、MinIO存储、PostgreSQL任务记录、BullMQ排队、独立图片转换 Worker 和 ZIP 打包 Worker。
 - 前端采用复古像素宇宙视觉，动效直接映射现有上传和转换状态，触屏及减少动态效果模式自动降级。
-- 已补齐单服务器生产部署：Caddy、Web、API、Worker、PostgreSQL、Redis和MinIO由独立生产Compose统一编排。
-- 生产HTTPS使用三套腾讯云手动证书；部署前校验证书，替换后通过Caddy热重载生效。
+- 已补齐单服务器生产部署：宿主机Nginx统一承载现有网站和轻转的公网入口，Web、API、Worker、PostgreSQL、Redis和MinIO由独立生产Compose编排。
+- 生产HTTPS使用三套腾讯云手动证书；部署前校验证书，替换后通过宿主机Nginx热重载生效。
 - 生产镜像由GitHub Actions构建并以完整Git SHA推送到腾讯云TCR；服务器只拉取镜像，不执行 `npm ci` 或前后端编译。
 - 2核4G服务器的生产转换与归档并发默认均为1；部署后只保留当前和上一版应用镜像，回滚缺失镜像时从TCR重新拉取。
 - 当前链路是 `上传 -> 对象存储 -> 数据库任务 -> conversion 队列 -> 转换 Worker -> 结果存储 -> 下载`。
@@ -24,7 +24,7 @@
 - 图片、音视频、文档等CPU密集转换必须由独立 Worker 消费 `conversion` 队列。
 - 不要在 Next.js 或 NestJS 请求进程内执行长时间转换。
 - 未经明确要求，不要用D1替换PostgreSQL，也不要把业务存储耦合到前端Sites Worker。
-- 生产环境只由Caddy暴露80/443；MinIO内部读写使用 `S3_ENDPOINT`，浏览器签名地址使用 `S3_PUBLIC_ENDPOINT`。
+- 生产环境只由宿主机Nginx暴露80/443；Web、API和MinIO API只绑定127.0.0.1回环端口，MinIO内部读写使用 `S3_ENDPOINT`，浏览器签名地址使用 `S3_PUBLIC_ENDPOINT`。
 
 ## 开发约束
 
@@ -45,6 +45,7 @@
 - 生产发布：在GitHub Actions手动运行 `Deploy production`
 - 已构建SHA的服务器手动补发：`APP_VERSION=完整Git提交SHA SKIP_GIT_PULL=1 npm run deploy:prod`
 - 生产应用镜像清理：`npm run cleanup:prod`
+- 安装/更新宿主机Nginx站点：`npm run nginx:install`
 - 生产证书校验/重载：`npm run certs:check` / `npm run certs:reload`
 - 生产配置、备份、恢复和回滚：读取 `docs/deployment.md`。
 - 修改完成后不要主动启动项目；默认复用用户已经启动的服务，启动动作交给用户执行。

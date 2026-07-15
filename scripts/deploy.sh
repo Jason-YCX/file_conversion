@@ -47,11 +47,14 @@ echo "Applying database migrations..."
 compose --profile tools run --rm migrate
 
 echo "Updating application services..."
-compose up -d --no-build --remove-orphans web api worker caddy
+compose up -d --no-build --remove-orphans web api worker
+
+echo "Installing and reloading the host Nginx site..."
+"${SCRIPT_DIR}/install-nginx-site.sh"
 
 if ! "${SCRIPT_DIR}/healthcheck.sh"; then
   compose ps >&2
-  compose logs --tail=100 web api worker caddy >&2
+  compose logs --tail=100 web api worker >&2
   echo "Deployment did not pass health checks. Previous images were kept for rollback." >&2
   exit 1
 fi

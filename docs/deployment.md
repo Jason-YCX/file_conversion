@@ -1,18 +1,18 @@
 # 生产部署
 
-本文档描述将轻转的前端、API、转换 Worker、PostgreSQL、Redis、MinIO和Caddy全部部署到同一台Linux服务器的流程。GitHub Actions负责构建应用镜像并推送腾讯云TCR，生产服务器只拉取镜像和运行容器；生产环境使用独立的 `compose.production.yaml`，不复用会向宿主机暴露基础设施端口的本地 `compose.yaml`。
+本文档描述在一台已经运行Nginx的Linux服务器上部署轻转前端、API、转换 Worker、PostgreSQL、Redis和MinIO的流程。GitHub Actions负责构建应用镜像并推送腾讯云TCR，生产服务器只拉取镜像和运行容器；生产环境使用独立的 `compose.production.yaml`，不复用会向宿主机暴露基础设施端口的本地 `compose.yaml`。
 
 ## 部署结构
 
-- `Caddy`：监听80/443，读取腾讯云手动证书，并转发三个域名。
-- `web`：运行Vinext standalone前端，只在Docker网络内监听3000。
-- `api`：运行NestJS API，只在Docker网络内监听4000。
+- 宿主机 `Nginx`：继续监听80/443并承载其他网站，同时读取三套腾讯云手动证书，将轻转的三个域名转发到回环端口。
+- `web`：运行Vinext standalone前端，容器内监听3000，仅映射到宿主机 `127.0.0.1:13000`。
+- `api`：运行NestJS API，容器内监听4000，仅映射到宿主机 `127.0.0.1:14000`。
 - `worker`：与API使用同一个后端镜像，独立消费conversion和archive队列。
 - `postgres`：持久化任务和归档记录。
 - `redis`：仅承载BullMQ队列并开启AOF。
-- `minio`：保存上传、转换结果和归档文件；控制台不开放公网。
+- `minio`：保存上传、转换结果和归档文件，API仅映射到宿主机 `127.0.0.1:19000`；控制台不开放宿主机端口。
 
-生产环境只有Caddy的80、443端口映射到宿主机。PostgreSQL、Redis、MinIO和Node服务均不直接暴露公网。
+生产环境只有宿主机Nginx直接暴露80、443。三个回环端口无法从公网访问，PostgreSQL、Redis、MinIO控制台也不映射宿主机端口。
 
 ## 服务器准备
 
@@ -23,13 +23,25 @@ docker version
 docker compose version
 ```
 
-防火墙只需开放SSH、HTTP和HTTPS：
+确认服务器现有Nginx配置正常：
+
+```bash
+sudo nginx -t
+sudo systemctl status nginx --no-pager
+```
+
+首次部署前确认其他站点没有占用轻转的三个 `server_name`；没有输出表示尚未配置：
+
+```bash
+sudo nginx -T 2>/dev/null | grep -nE 'qingzhuan(-api|-files)?\.jason-ycx\.top' || true
+```
+
+防火墙只需开放SSH、HTTP和HTTPS TCP端口：
 
 ```text
 22/tcp
 80/tcp
 443/tcp
-443/udp
 ```
 
 将以下DNS记录解析到服务器公网IP：
@@ -67,6 +79,14 @@ chmod 600 .env.production
 3. 为PostgreSQL、Redis和MinIO分别设置不同的随机密码。
 4. 密码建议使用 `openssl rand -hex 24` 生成，避免URL中需要额外编码的特殊字符。
 
+默认回环端口如下；仅当服务器已有进程占用这些端口时才修改，并让部署脚本重新生成Nginx配置：
+
+```text
+WEB_HOST_PORT=13000
+API_HOST_PORT=14000
+MINIO_HOST_PORT=19000
+```
+
 服务器需要登录TCR才能拉取私有镜像：
 
 ```bash
@@ -77,7 +97,7 @@ docker login --username 你的TCR用户名 ccr.ccs.tencentyun.com
 
 ## 腾讯云手动证书
 
-Caddy不会申请ACME证书，生产环境需要提前放置三套腾讯云证书：
+宿主机Nginx不会为本项目申请ACME证书，生产环境需要提前放置三套腾讯云证书：
 
 ```text
 certs/
@@ -103,6 +123,8 @@ npm run certs:check
 ```
 
 部署脚本也会在拉取应用镜像前自动执行相同校验。证书至少需要剩余7天有效期，否则部署会停止。
+
+Nginx模板位于 `nginx/file-conversion.conf.template`。`npm run nginx:install` 会读取 `.env.production` 和当前项目绝对路径，生成 `/etc/nginx/sites-available/file-conversion.conf`，创建 `sites-enabled` 软链接，运行 `nginx -t` 并热重载。它只管理这一份站点文件，不修改其他网站；若校验或重载失败，会恢复此前的同名配置。GitHub Actions使用的 `PRODUCTION_USER` 必须是root，或对Nginx测试、站点文件写入和 `systemctl reload nginx` 配置免密sudo；当前使用root部署时无需额外配置。
 
 先检查配置能否解析：
 
@@ -135,8 +157,11 @@ APP_VERSION=完整Git提交SHA SKIP_GIT_PULL=1 ./scripts/deploy.sh
 3. 启动PostgreSQL、Redis和MinIO。
 4. 在迁移前备份数据库。
 5. 执行Drizzle迁移。
-6. 更新Web、API、Worker和Caddy。
-7. 检查数据库、Redis、存储和Worker心跳。
+6. 更新Web、API和Worker，并清理旧Caddy孤儿容器。
+7. 安装或更新宿主机Nginx站点，校验后热重载Nginx。
+8. 检查数据库、Redis、存储和Worker心跳。
+
+从旧Caddy部署切换时不要停止宿主机Nginx。新版Compose已经没有Caddy服务，部署命令中的 `--remove-orphans` 会移除旧Caddy容器；其他网站和Nginx主进程不会受影响。
 
 验证入口：
 
@@ -185,7 +210,7 @@ docker system prune -a
 
 1. 将新bundle/fullchain证书和私钥复制到对应目录，保持文件名为 `cert.pem`、`key.pem`。
 2. 执行 `npm run certs:check`，确认域名、有效期和密钥完全匹配。
-3. 执行 `npm run certs:reload`，Caddy会先验证完整配置，再热重载三套证书。
+3. 执行 `npm run certs:reload`，脚本会先运行 `nginx -t`，再热重载三套证书。
 4. 分别用浏览器检查三个HTTPS域名的证书有效期。
 
 ```bash
@@ -194,7 +219,7 @@ npm run certs:check
 npm run certs:reload
 ```
 
-热重载不会重启前端、API、Worker、PostgreSQL、Redis或MinIO；校验失败时仍继续使用旧证书和旧配置。
+热重载不会重启前端、API、Worker、PostgreSQL、Redis或MinIO；配置校验失败时Nginx不会重载。
 
 ## GitHub手动发布
 
@@ -234,7 +259,7 @@ PRODUCTION_PROJECT_DIR=/usr/local/projects/file_conversion
 ```bash
 APP_VERSION="$(cat .deploy/current)" docker compose --env-file .env.production -f compose.production.yaml ps
 APP_VERSION="$(cat .deploy/current)" docker compose --env-file .env.production -f compose.production.yaml logs -f web api worker
-APP_VERSION="$(cat .deploy/current)" docker compose --env-file .env.production -f compose.production.yaml logs -f caddy
+sudo journalctl -u nginx -f
 ```
 
 容器日志限制为每个文件10MB、最多5个文件，防止长期运行占满磁盘。仍需监控服务器磁盘、内存、CPU以及 `/api/v1/health`。
@@ -278,12 +303,12 @@ CONFIRM_RESTORE=yes ./scripts/restore.sh backups/qingzhuan-时间.dump
 生产Compose使用以下Docker数据卷：
 
 ```text
-caddy-data
-caddy-config
 postgres-data
 redis-data
 minio-data
 ```
+
+从旧版切换后，历史 `caddy-data`、`caddy-config` 卷可能暂时保留，但不会再挂载；确认新站点稳定后可以仅删除这两个旧卷，不要执行会批量清理数据卷的命令。
 
 原始上传、转换结果和ZIP仍只保留2小时，由Worker启动时及每10分钟清理。数据库任务记录继续保留，用于向用户说明文件已经过期。
 

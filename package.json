@@ -26,6 +26,7 @@
     "restore:prod": "./scripts/restore.sh",
     "rollback:prod": "./scripts/rollback.sh",
     "cleanup:prod": "./scripts/cleanup-images.sh",
+    "nginx:install": "./scripts/install-nginx-site.sh",
     "certs:check": "./scripts/check-certificates.sh",
     "certs:reload": "./scripts/reload-certificates.sh",
     "test": "npm run test:web && npm run test:api",
