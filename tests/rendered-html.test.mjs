@@ -25,6 +25,7 @@ test("server-renders the light conversion homepage", async () => {
   assert.match(html, /大家常用/);
   assert.match(html, /更多文件工具/);
   assert.doesNotMatch(html, /主导航|搜索工具|>登录</);
+  assert.doesNotMatch(html, /先把每一次文件转换做得简单|>文件转换<|>全部工具</);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
@@ -78,8 +79,21 @@ test("keeps the server-backed conversion experience interactive and responsive",
   assert.match(page, /brand\/qingzhuan-logo\.png/);
   assert.match(page, /celebrating/);
   assert.match(css, /@font-face[\s\S]*Ark Pixel/);
+  assert.match(css, /\.footer-brand \{[\s\S]*background: var\(--cream\)[\s\S]*box-shadow:/);
   assert.match(css, /\(hover: none\), \(pointer: coarse\)/);
   assert.match(css, /\.pixel-cursor-halo\.is-active/);
+  assert.match(page, /pixel-cursor-enabled/);
+  assert.match(page, /finePointer\.matches && !reducedMotion\.matches/);
+  assert.match(
+    page,
+    /const transform = `translate3d\(\$\{event\.clientX\}px, \$\{event\.clientY\}px, 0\)`/,
+  );
+  assert.doesNotMatch(page, /requestAnimationFrame|haloX|haloY|\* 0\.18/);
+  assert.match(css, /html\.pixel-cursor-enabled \*[\s\S]*cursor: none !important/);
+  const narrowScreenStart = css.indexOf("@media (max-width: 820px)");
+  const pointerFallbackStart = css.indexOf("@media (hover: none)", narrowScreenStart);
+  const narrowScreenRules = css.slice(narrowScreenStart, pointerFallbackStart);
+  assert.doesNotMatch(narrowScreenRules, /\.pixel-cursor\s*\{[\s\S]*?display:\s*none/);
 
   await Promise.all([
     access(new URL("../public/pixel/pixel-horizon.png", import.meta.url)),

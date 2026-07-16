@@ -152,59 +152,55 @@ function PixelCursor() {
   const haloRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const root = document.documentElement;
     const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    if (!finePointer.matches || reducedMotion.matches) return;
+    let cursorEnabled = false;
 
-    let pointerX = -100;
-    let pointerY = -100;
-    let haloX = -100;
-    let haloY = -100;
-    let animationFrame = 0;
-
-    const draw = () => {
-      haloX += (pointerX - haloX) * 0.18;
-      haloY += (pointerY - haloY) * 0.18;
-      if (dotRef.current) {
-        dotRef.current.style.transform = `translate3d(${pointerX}px, ${pointerY}px, 0)`;
-      }
-      if (haloRef.current) {
-        haloRef.current.style.transform = `translate3d(${haloX}px, ${haloY}px, 0)`;
-      }
-      animationFrame = window.requestAnimationFrame(draw);
+    const hideCursorEffect = () => {
+      dotRef.current?.classList.remove("is-visible");
+      haloRef.current?.classList.remove("is-visible", "is-active");
+    };
+    const syncCursorMode = () => {
+      cursorEnabled = finePointer.matches && !reducedMotion.matches;
+      root.classList.toggle("pixel-cursor-enabled", cursorEnabled);
+      if (!cursorEnabled) hideCursorEffect();
+    };
+    const syncInteractiveState = (target: EventTarget | null) => {
+      if (!cursorEnabled) return;
+      const interactive = target instanceof Element
+        ? target.closest("a, button, select, input, .drop-zone")
+        : null;
+      haloRef.current?.classList.toggle("is-active", Boolean(interactive));
     };
 
     const handlePointerMove = (event: PointerEvent) => {
-      pointerX = event.clientX;
-      pointerY = event.clientY;
+      if (!cursorEnabled) return;
+      const transform = `translate3d(${event.clientX}px, ${event.clientY}px, 0)`;
+      if (dotRef.current) dotRef.current.style.transform = transform;
+      if (haloRef.current) haloRef.current.style.transform = transform;
       dotRef.current?.classList.add("is-visible");
       haloRef.current?.classList.add("is-visible");
-      const interactive = (event.target as HTMLElement).closest(
-        "a, button, select, input, .drop-zone",
-      );
-      haloRef.current?.classList.toggle("is-active", Boolean(interactive));
+      syncInteractiveState(event.target);
     };
     const handlePointerOver = (event: PointerEvent) => {
-      const interactive = (event.target as HTMLElement).closest(
-        "a, button, select, input, .drop-zone",
-      );
-      haloRef.current?.classList.toggle("is-active", Boolean(interactive));
-    };
-    const handlePointerLeave = () => {
-      dotRef.current?.classList.remove("is-visible");
-      haloRef.current?.classList.remove("is-visible");
+      syncInteractiveState(event.target);
     };
 
+    syncCursorMode();
     window.addEventListener("pointermove", handlePointerMove, { passive: true });
     document.addEventListener("pointerover", handlePointerOver, { passive: true });
-    document.documentElement.addEventListener("mouseleave", handlePointerLeave);
-    animationFrame = window.requestAnimationFrame(draw);
+    root.addEventListener("mouseleave", hideCursorEffect);
+    finePointer.addEventListener("change", syncCursorMode);
+    reducedMotion.addEventListener("change", syncCursorMode);
 
     return () => {
-      window.cancelAnimationFrame(animationFrame);
+      root.classList.remove("pixel-cursor-enabled");
       window.removeEventListener("pointermove", handlePointerMove);
       document.removeEventListener("pointerover", handlePointerOver);
-      document.documentElement.removeEventListener("mouseleave", handlePointerLeave);
+      root.removeEventListener("mouseleave", hideCursorEffect);
+      finePointer.removeEventListener("change", syncCursorMode);
+      reducedMotion.removeEventListener("change", syncCursorMode);
     };
   }, []);
 
@@ -866,11 +862,6 @@ export default function Home() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/brand/qingzhuan-logo.png" alt="轻转" />
         </a>
-        <p>先把每一次文件转换做得简单，再慢慢装下更多实用工具。</p>
-        <div>
-          <a href="#converter">文件转换</a>
-          <a href="#tools">全部工具</a>
-        </div>
       </footer>
 
       <input ref={inputRef} className="visually-hidden-input" type="file" accept={imageInputAccept} multiple disabled={status === "uploading" || status === "converting"} onChange={handleFileChange} />
