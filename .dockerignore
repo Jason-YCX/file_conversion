@@ -2,7 +2,6 @@
 .github
 .next
 .vinext
-.wrangler
 dist
 apps/api/dist
 node_modules

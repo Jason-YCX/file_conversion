@@ -56,7 +56,6 @@ next-env.d.ts
 /dist/
 /apps/api/dist/
 /apps/api/coverage/
-/.wrangler/
 /outputs/
 /work/
 /backups/

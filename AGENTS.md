@@ -18,12 +18,12 @@
 
 ## 架构边界
 
-- 根目录是 Next.js/Vinext 前端，保持现有Sites兼容结构。
+- 根目录是 Next.js/Vinext 前端，生产构建只输出自托管的 `dist/standalone`，由生产Compose和宿主机Nginx承载。
 - `apps/api` 是 NestJS API，负责校验、签名、任务和队列编排。
 - 文件字节存对象存储，任务元数据存PostgreSQL，Redis只承载BullMQ队列。
 - 图片、音视频、文档等CPU密集转换必须由独立 Worker 消费 `conversion` 队列。
 - 不要在 Next.js 或 NestJS 请求进程内执行长时间转换。
-- 未经明确要求，不要用D1替换PostgreSQL，也不要把业务存储耦合到前端Sites Worker。
+- 业务存储固定使用PostgreSQL，前端不承担业务存储或后台任务职责。
 - 生产环境只由宿主机Nginx暴露80/443；Web、API和MinIO API只绑定127.0.0.1回环端口，MinIO内部读写使用 `S3_ENDPOINT`，浏览器签名地址使用 `S3_PUBLIC_ENDPOINT`。
 
 ## 开发约束

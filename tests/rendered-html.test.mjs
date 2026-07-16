@@ -5,17 +5,10 @@ import test from "node:test";
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+  const { default: handler } = await import(workerUrl.href);
 
-  return worker.fetch(
+  return handler(
     new Request("http://localhost/", { headers: { accept: "text/html" } }),
-    {
-      ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
   );
 }
 
@@ -73,7 +66,7 @@ test("keeps the server-backed conversion experience interactive and responsive",
   assert.match(apiPackageJson, /"start:worker:dev": "nest start --watch --entryFile worker"/);
   assert.doesNotMatch(apiPackageJson, /tsx watch src\/worker\.ts/);
   assert.doesNotMatch(page, /convertInBrowser|canvas\.toBlob|转换引擎暂未启用/);
-  assert.doesNotMatch(page + layout, /SkeletonPreview|_sites-preview|codex-preview/);
+  assert.doesNotMatch(page + layout, /SkeletonPreview|codex-preview/);
 
   assert.match(page, /PixelCursor/);
   assert.match(page, /pixel-horizon\.png/);
@@ -84,8 +77,6 @@ test("keeps the server-backed conversion experience interactive and responsive",
   assert.match(css, /@font-face[\s\S]*Ark Pixel/);
   assert.match(css, /\(hover: none\), \(pointer: coarse\)/);
   assert.match(css, /\.pixel-cursor-halo\.is-active/);
-
-  await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
 
   await Promise.all([
     access(new URL("../public/pixel/pixel-horizon.png", import.meta.url)),
