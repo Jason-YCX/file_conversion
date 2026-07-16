@@ -9,7 +9,6 @@ import {
   FileText,
   FileZip,
   ImageSquare,
-  MagnifyingGlass,
   MusicNotes,
   RocketLaunch,
   Sparkle,
@@ -230,7 +229,6 @@ export default function Home() {
   const [allFormatsOpen, setAllFormatsOpen] = useState(false);
   const [quality, setQuality] = useState(86);
   const [scale, setScale] = useState(1);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [celebrating, setCelebrating] = useState(false);
   const [archiveState, setArchiveState] = useState<"idle" | "creating" | "ready" | "error">("idle");
@@ -528,43 +526,9 @@ export default function Home() {
       <PixelCursor />
       <header className="site-header">
         <a className="brand" href="#top" aria-label="轻转首页">
-          轻转
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/qingzhuan-logo.png" alt="轻转" />
         </a>
-        <nav className="main-nav" aria-label="主导航">
-          <a href="#converter">
-            文件转换 <CaretDown size={15} weight="bold" />
-          </a>
-          <a href="#tools">
-            图片工具 <CaretDown size={15} weight="bold" />
-          </a>
-          <a href="#tools">
-            计算工具 <CaretDown size={15} weight="bold" />
-          </a>
-          <a href="#tools">
-            全部工具 <CaretDown size={15} weight="bold" />
-          </a>
-        </nav>
-        <div className="header-actions">
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="搜索工具"
-            aria-expanded={searchOpen}
-            onClick={() => setSearchOpen((open) => !open)}
-          >
-            <MagnifyingGlass size={27} weight="bold" />
-          </button>
-          <button className="login-button" type="button" onClick={() => setToast("登录功能将在正式版接入")}>登录</button>
-        </div>
-        {searchOpen && (
-          <div className="search-popover" role="dialog" aria-label="搜索工具">
-            <MagnifyingGlass size={20} />
-            <input autoFocus placeholder="搜索图片、音频或计算工具" aria-label="搜索工具" />
-            <button type="button" aria-label="关闭搜索" onClick={() => setSearchOpen(false)}>
-              <X size={18} />
-            </button>
-          </div>
-        )}
       </header>
 
       <section className="hero" id="top">
@@ -898,7 +862,10 @@ export default function Home() {
       </section>
 
       <footer className="site-footer">
-        <a className="footer-brand" href="#top">轻转</a>
+        <a className="footer-brand" href="#top" aria-label="返回轻转首页顶部">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/qingzhuan-logo.png" alt="轻转" />
+        </a>
         <p>先把每一次文件转换做得简单，再慢慢装下更多实用工具。</p>
         <div>
           <a href="#converter">文件转换</a>

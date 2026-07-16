@@ -24,6 +24,7 @@ test("server-renders the light conversion homepage", async () => {
   assert.match(html, /上传图片/);
   assert.match(html, /大家常用/);
   assert.match(html, /更多文件工具/);
+  assert.doesNotMatch(html, /主导航|搜索工具|>登录</);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
@@ -47,6 +48,7 @@ test("keeps the server-backed conversion experience interactive and responsive",
   assert.match(page, /WebP.*JPG.*PNG/s);
   assert.doesNotMatch(page, /"BMP"|\.bmp|image\/bmp/i);
   assert.match(page, /查看全部图片格式/);
+  assert.doesNotMatch(page, /className="main-nav"|className="header-actions"|searchOpen/);
   assert.match(page, /role="status"/);
   assert.match(page, /pollConversion/);
   assert.match(page, /打包下载/);
@@ -73,6 +75,7 @@ test("keeps the server-backed conversion experience interactive and responsive",
   assert.match(page, /pixel-ufo\.png/);
   assert.match(page, /pixel-rocket\.png/);
   assert.match(page, /pixel-stars\.png/);
+  assert.match(page, /brand\/qingzhuan-logo\.png/);
   assert.match(page, /celebrating/);
   assert.match(css, /@font-face[\s\S]*Ark Pixel/);
   assert.match(css, /\(hover: none\), \(pointer: coarse\)/);
@@ -84,6 +87,10 @@ test("keeps the server-backed conversion experience interactive and responsive",
     access(new URL("../public/pixel/pixel-rocket.png", import.meta.url)),
     access(new URL("../public/pixel/pixel-stars.png", import.meta.url)),
     access(new URL("../public/pixel/pixel-orbit-trail.png", import.meta.url)),
+    access(new URL("../public/brand/qingzhuan-logo.png", import.meta.url)),
+    access(new URL("../public/brand/qingzhuan-mark.png", import.meta.url)),
+    access(new URL("../app/icon.png", import.meta.url)),
+    access(new URL("../app/apple-icon.png", import.meta.url)),
     access(new URL("../public/fonts/ark-pixel/OFL.txt", import.meta.url)),
   ]);
 });

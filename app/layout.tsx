@@ -19,6 +19,10 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title,
     description,
+    icons: {
+      icon: "/icon.png",
+      apple: "/apple-icon.png",
+    },
     openGraph: {
       type: "website",
       title,
