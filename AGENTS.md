@@ -15,6 +15,7 @@
 - 已补齐单服务器生产部署：宿主机Nginx统一承载现有网站和轻转的公网入口，Web、API、Worker、PostgreSQL、Redis和MinIO由独立生产Compose编排。
 - 生产HTTPS使用三套腾讯云手动证书；部署前校验证书，替换后通过宿主机Nginx热重载生效。
 - 生产镜像由GitHub Actions构建并以完整Git SHA推送到腾讯云TCR；服务器只拉取镜像，不执行 `npm ci` 或前后端编译。
+- GitHub Actions以服务器 `.deploy/current` 为差异基线，只构建输入发生变化的Web或Backend镜像；未变化镜像在TCR复用旧镜像并补充本次SHA标签，基线或旧标签不可用时自动回退构建，外部构建变量变化时使用 `force_rebuild`。
 - 2核4G服务器的生产转换与归档并发默认均为1；部署后只保留当前和上一版应用镜像，回滚缺失镜像时从TCR重新拉取。
 - 当前链路是 `上传 -> 对象存储 -> 数据库任务 -> conversion 队列 -> 转换 Worker -> 结果存储 -> 下载`。
 - 转换状态包含 `queued / processing / completed / failed / cancelled`，只有 `completed` 才能下载。
@@ -40,6 +41,7 @@
 - 批量下载由后端 `archive` 队列流式生成 ZIP，不在浏览器内压缩大文件。
 - `uploads/`、`converted/`、`archives/` 下的文件统一只保留2小时；Worker 启动时及每10分钟清理，过期任务标记为 `expired`。
 - 基础设施连接异常时，先启动Compose，再检查 `/api/v1/health`，不要直接改业务代码规避。
+- 新增会进入Web或Backend生产镜像的源码目录、构建配置或依赖清单时，同步更新 `.github/workflows/deploy-production.yml` 中的 `web_paths` 或 `backend_paths`，避免增量发布误复用旧镜像。
 
 ## 常用命令
 

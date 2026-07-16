@@ -2,6 +2,12 @@ name: Deploy production
 
 on:
   workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: Rebuild both images even when source paths are unchanged
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: qingzhuan-production
@@ -50,6 +56,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Validate release configuration
         run: |
@@ -69,6 +77,95 @@ jobs:
             fi
           done
 
+      - name: Configure production SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/github_actions_production
+          chmod 600 ~/.ssh/github_actions_production
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Detect production image changes
+        id: changes
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PORT: ${{ secrets.PRODUCTION_PORT }}
+          FORCE_REBUILD: ${{ inputs.force_rebuild }}
+        run: |
+          base_sha=""
+          web_changed=true
+          backend_changed=true
+
+          if [[ "$FORCE_REBUILD" == "true" ]]; then
+            echo "Full image rebuild requested manually."
+          else
+            printf -v current_release_command \
+              'cd %q && { cat .deploy/current 2>/dev/null || true; }' \
+              "$PRODUCTION_PROJECT_DIR"
+            base_sha="$(
+              ssh \
+                -i ~/.ssh/github_actions_production \
+                -p "${PRODUCTION_PORT:-22}" \
+                "$PRODUCTION_USER@$PRODUCTION_HOST" \
+                "$current_release_command" |
+                tr -d '[:space:]'
+            )"
+
+            if [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] && \
+              git cat-file -e "${base_sha}^{commit}" 2>/dev/null && \
+              git merge-base --is-ancestor "$base_sha" "$GITHUB_SHA"; then
+              web_paths=(
+                .dockerignore
+                .github/workflows/deploy-production.yml
+                .npmrc
+                Dockerfile.web
+                package.json
+                package-lock.json
+                apps/api/package.json
+                app
+                lib
+                public
+                worker
+                next.config.ts
+                vite.config.ts
+                tsconfig.json
+                postcss.config.mjs
+              )
+              backend_paths=(
+                .dockerignore
+                .github/workflows/deploy-production.yml
+                .npmrc
+                Dockerfile.backend
+                package.json
+                package-lock.json
+                apps/api
+              )
+
+              if git diff --quiet "$base_sha" "$GITHUB_SHA" -- "${web_paths[@]}"; then
+                web_changed=false
+              fi
+              if git diff --quiet "$base_sha" "$GITHUB_SHA" -- "${backend_paths[@]}"; then
+                backend_changed=false
+              fi
+            else
+              echo "No usable deployed ancestor was found; both images will be rebuilt."
+              base_sha=""
+            fi
+          fi
+
+          {
+            echo "base_sha=$base_sha"
+            echo "web_changed=$web_changed"
+            echo "backend_changed=$backend_changed"
+          } >> "$GITHUB_OUTPUT"
+          echo "Production base: ${base_sha:-none}"
+          echo "Web source changed: $web_changed"
+          echo "Backend source changed: $backend_changed"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -79,7 +176,35 @@ jobs:
           username: ${{ secrets.TCR_USERNAME }}
           password: ${{ secrets.TCR_PASSWORD }}
 
+      - name: Resolve web image
+        id: web-image
+        env:
+          SOURCE_CHANGED: ${{ steps.changes.outputs.web_changed }}
+          BASE_SHA: ${{ steps.changes.outputs.base_sha }}
+          RELEASE: ${{ github.sha }}
+        run: |
+          build=true
+          target="$TCR_REGISTRY/$TCR_NAMESPACE/$WEB_IMAGE:$RELEASE"
+
+          if [[ "$SOURCE_CHANGED" == "false" ]]; then
+            if docker buildx imagetools inspect "$target" >/dev/null 2>&1; then
+              echo "Web image for this release already exists; reusing it."
+              build=false
+            else
+              source="$TCR_REGISTRY/$TCR_NAMESPACE/$WEB_IMAGE:$BASE_SHA"
+              if docker buildx imagetools create --tag "$target" "$source"; then
+                echo "Web source is unchanged; copied the deployed image tag."
+                build=false
+              else
+                echo "Unable to copy the deployed Web image; falling back to a rebuild."
+              fi
+            fi
+          fi
+
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
       - name: Build and push web image
+        if: steps.web-image.outputs.build == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -93,7 +218,35 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 
+      - name: Resolve backend image
+        id: backend-image
+        env:
+          SOURCE_CHANGED: ${{ steps.changes.outputs.backend_changed }}
+          BASE_SHA: ${{ steps.changes.outputs.base_sha }}
+          RELEASE: ${{ github.sha }}
+        run: |
+          build=true
+          target="$TCR_REGISTRY/$TCR_NAMESPACE/$BACKEND_IMAGE:$RELEASE"
+
+          if [[ "$SOURCE_CHANGED" == "false" ]]; then
+            if docker buildx imagetools inspect "$target" >/dev/null 2>&1; then
+              echo "Backend image for this release already exists; reusing it."
+              build=false
+            else
+              source="$TCR_REGISTRY/$TCR_NAMESPACE/$BACKEND_IMAGE:$BASE_SHA"
+              if docker buildx imagetools create --tag "$target" "$source"; then
+                echo "Backend source is unchanged; copied the deployed image tag."
+                build=false
+              else
+                echo "Unable to copy the deployed Backend image; falling back to a rebuild."
+              fi
+            fi
+          fi
+
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
       - name: Build and push backend image
+        if: steps.backend-image.outputs.build == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -106,16 +259,15 @@ jobs:
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
-      - name: Configure production SSH key
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+      - name: Summarize image plan
         run: |
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/github_actions_production
-          chmod 600 ~/.ssh/github_actions_production
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
+          base_sha="${{ steps.changes.outputs.base_sha }}"
+          {
+            echo "## Production image plan"
+            echo "- Base release: ${base_sha:-none}"
+            echo "- Web rebuilt: ${{ steps.web-image.outputs.build }}"
+            echo "- Backend rebuilt: ${{ steps.backend-image.outputs.build }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy on production server
         env:
@@ -124,6 +276,8 @@ jobs:
           PRODUCTION_PORT: ${{ secrets.PRODUCTION_PORT }}
           RELEASE: ${{ github.sha }}
         run: |
+          # The command substitution is intentionally evaluated on the server.
+          # shellcheck disable=SC2016
           printf -v remote_command \
             'cd %q && git diff --quiet && git diff --cached --quiet && git pull --ff-only && test "$(git rev-parse HEAD)" = %q && SKIP_GIT_PULL=1 APP_VERSION=%q ./scripts/deploy.sh' \
             "$PRODUCTION_PROJECT_DIR" \

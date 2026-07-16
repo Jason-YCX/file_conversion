@@ -252,7 +252,18 @@ PRODUCTION_API_BASE_URL=https://qingzhuan-api.jason-ycx.top/api/v1
 PRODUCTION_PROJECT_DIR=/usr/local/projects/file_conversion
 ```
 
-配置完成后，在GitHub Actions中手动运行 `Deploy production`。工作流先执行 `npm run lint` 和 `npm test`，再顺序构建和推送Web、Backend镜像，最后连接服务器拉取相同SHA并部署。任一构建或推送失败都不会连接服务器；默认不在推送main时自动上线。
+配置完成后，在GitHub Actions中手动运行 `Deploy production`。工作流始终先执行 `npm run lint` 和 `npm test`，然后读取服务器 `.deploy/current` 作为生产基线，并与本次Git SHA比较构建输入：
+
+- 前端页面、资源、前端构建配置或 `Dockerfile.web` 变化时构建Web镜像。
+- `apps/api` 或 `Dockerfile.backend` 变化时构建Backend镜像。
+- 根 `package.json`、`package-lock.json`、`.dockerignore` 或发布工作流变化时构建两个镜像。
+- 纯文档、Compose、Nginx或部署脚本变化时不重新构建应用镜像，但仍执行服务器部署以应用配置。
+
+以后新增会进入生产镜像的顶层源码目录或构建配置时，必须同步加入工作流的 `web_paths` 或 `backend_paths`；现有前后端目录和依赖清单已经覆盖。
+
+未变化的镜像不会缺少本次Git SHA标签：工作流使用TCR中当前生产镜像复制出本次SHA标签，不重新上传镜像层；如果生产SHA无效、不是本次提交的祖先、旧标签不存在或复制失败，会自动回退为重新构建对应镜像。首次发布会构建两个镜像。
+
+如果修改了GitHub Environment中的 `PRODUCTION_API_BASE_URL`、`DOCKER_PLATFORM` 等不体现在源码差异里的构建变量，运行工作流时勾选 `force_rebuild`，强制重新构建两个镜像。无论是否构建镜像，最终仍连接服务器拉取相同SHA并部署；默认不在推送main时自动上线。
 
 ## 日志和状态
 

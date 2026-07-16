@@ -67,7 +67,7 @@ npm run infra:down
 - `.env.production.example`：不含真实密钥的生产环境模板
 - `scripts/`：部署、Nginx站点安装、镜像清理、证书校验/热重载、健康检查、备份、恢复和应用镜像回滚
 
-生产镜像不再由服务器现场构建。GitHub Actions完成检查后，在GitHub Runner中分别构建Web和Backend镜像，以完整Git提交SHA为版本推送到腾讯云TCR；服务器只拉取对应SHA并启动。构建时 `ffmpeg-static` 使用npmmirror，Docker内的 `npm ci` 关闭audit和fund请求。
+生产镜像不再由服务器现场构建。GitHub Actions完成检查后，以服务器 `.deploy/current` 记录的生产SHA为基线判断Web和Backend构建输入是否变化：变化的镜像正常构建，未变化的镜像在TCR中复用旧镜像并补充本次Git SHA标签；服务器仍只拉取同一SHA并启动。首次发布、找不到基线镜像或手动勾选 `force_rebuild` 时会安全回退为两个镜像全部构建。构建时 `ffmpeg-static` 使用npmmirror，Docker内的 `npm ci` 关闭audit和fund请求。
 
 首次部署前，将 `.env.production.example` 复制为 `.env.production`，填写域名和随机密钥，登录TCR，并按 `certs/README.md` 放置三套腾讯云证书。生产发布通过GitHub Actions手动运行 `Deploy production`，服务器不会执行依赖安装或项目编译。
 
