@@ -18,7 +18,8 @@
 - GitHub Actions以服务器 `.deploy/current` 为差异基线，只构建输入发生变化的Web或Backend镜像；未变化镜像在TCR复用旧镜像并补充本次SHA标签，基线或旧标签不可用时自动回退构建，外部构建变量变化时使用 `force_rebuild`。
 - 2核4G服务器的生产转换与归档并发默认均为1；部署后只保留当前和上一版应用镜像，回滚缺失镜像时从TCR重新拉取。
 - 当前链路是 `上传 -> 对象存储 -> 数据库任务 -> conversion 队列 -> 转换 Worker -> 结果存储 -> 下载`。
-- 转换状态包含 `queued / processing / completed / failed / cancelled`，只有 `completed` 才能下载。
+- 转换状态包含 `queued / processing / completed / failed / cancelled / expired`，只有 `completed` 才能下载。
+- 后端 Swagger 已补齐中文接口注释、请求响应模型和错误说明；其他服务的完整调用流程、示例和错误码统一维护在 `docs/api-integration.md`。
 
 ## 架构边界
 
@@ -36,6 +37,7 @@
 - 修改环境变量时同步根目录或 `apps/api/.env.example`。
 - 修改数据库结构时同步Drizzle schema并提交生成的迁移。
 - 修改API时同步DTO、Swagger描述和相关测试。
+- 修改对外接口契约时同步 `docs/api-integration.md`，确保服务间对接文档与实际代码一致。
 - 图片转换输入覆盖 JPG、PNG、WebP、AVIF、HEIC/HEIF、SVG、GIF、TIFF，输出覆盖 WebP、JPG、PNG、AVIF、GIF、TIFF，共 42 条跨格式路径；BMP 不在支持范围内。
 - 动态 GIF/WebP/TIFF 仅在输出 GIF/WebP/AVIF 时保留动画；转 JPG/PNG/TIFF 时取首帧。
 - 批量下载由后端 `archive` 队列流式生成 ZIP，不在浏览器内压缩大文件。

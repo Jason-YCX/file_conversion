@@ -29,8 +29,14 @@ async function bootstrap() {
 
   const swagger = new DocumentBuilder()
     .setTitle("轻转 API")
-    .setDescription("轻转文件上传与转换任务 API")
+    .setDescription(
+      "轻转服务端对接接口。调用顺序：申请直传地址 → PUT 上传文件 → 创建转换任务 → 查询状态 → 下载结果；批量下载需在所有转换任务完成后创建 ZIP 任务。当前接口未启用 API Key 或 OAuth 鉴权。",
+    )
     .setVersion("1.0")
+    .addTag("健康检查", "检查 API 依赖和转换 Worker 状态")
+    .addTag("文件上传", "申请对象存储临时签名地址")
+    .addTag("转换任务", "创建、查询和下载图片转换任务")
+    .addTag("批量下载", "创建、查询和下载 ZIP 压缩任务")
     .build();
   SwaggerModule.setup("docs", app, SwaggerModule.createDocument(app, swagger));
 

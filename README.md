@@ -81,6 +81,8 @@ APP_VERSION=完整Git提交SHA SKIP_GIT_PULL=1 ./scripts/deploy.sh
 
 ## API
 
+面向其他服务的完整调用流程、请求响应示例、状态流转和错误码见 [`docs/api-integration.md`](docs/api-integration.md)。交互式接口文档由 Swagger 提供：本地为 `http://localhost:4000/docs`，生产配置为 `https://qingzhuan-api.jason-ycx.top/docs`。
+
 - `GET /api/v1/health`：检查 PostgreSQL、Redis 和对象存储
 - `POST /api/v1/uploads/presign`：生成文件直传地址
 - `POST /api/v1/jobs`：校验已上传对象并创建排队任务
