@@ -19,9 +19,10 @@ test("server-renders the light conversion homepage", async () => {
 
   const html = await response.text();
   assert.match(html, /<html[^>]+lang="zh-CN"/i);
-  assert.match(html, /<title>轻转 · 在线图片格式转换工具<\/title>/i);
+  assert.match(html, /<title>轻转 · 在线图片格式转换与压缩工具<\/title>/i);
   assert.match(html, /想把图片转成什么？/);
   assert.match(html, /上传图片/);
+  assert.match(html, /图片压缩/);
   assert.match(html, /大家常用/);
   assert.match(html, /更多文件工具/);
   assert.doesNotMatch(html, /主导航|搜索工具|>登录</);
@@ -42,6 +43,11 @@ test("keeps the server-backed conversion experience interactive and responsive",
   assert.match(page, /requestUploadTicket/);
   assert.match(page, /uploadToObjectStorage/);
   assert.match(page, /createConversionJob/);
+  assert.match(page, /operation: "compress"/);
+  assert.match(page, /compressionPreset/);
+  assert.match(page, /compressionImageExtensions/);
+  assert.match(page, /最大宽度/);
+  assert.match(page, /默认移除 EXIF\/GPS/);
   assert.match(page, /mapWithConcurrency\(pendingItems, 3/);
   assert.match(page, /items\.map\(\(item\)/);
   assert.doesNotMatch(page, /items\.slice\(0, 3\)/);
@@ -58,6 +64,8 @@ test("keeps the server-backed conversion experience interactive and responsive",
   assert.match(apiClient, /NEXT_PUBLIC_API_BASE_URL/);
   assert.match(apiClient, /XMLHttpRequest/);
   assert.match(css, /@media \(max-width: 820px\)/);
+  assert.match(css, /\.mode-switch/);
+  assert.match(css, /\.compression-settings/);
   assert.match(css, /prefers-reduced-motion: reduce/);
   assert.match(css, /\.queue-list[\s\S]*max-height: 240px[\s\S]*overflow-y: auto/);
   assert.match(css, /\.toast[\s\S]*top: calc\(104px \+ env\(safe-area-inset-top, 0px\)\)/);
@@ -69,6 +77,7 @@ test("keeps the server-backed conversion experience interactive and responsive",
   assert.match(apiPackageJson, /"start:worker:dev": "nest start --watch --entryFile worker"/);
   assert.doesNotMatch(apiPackageJson, /tsx watch src\/worker\.ts/);
   assert.doesNotMatch(page, /convertInBrowser|canvas\.toBlob|转换引擎暂未启用/);
+  assert.doesNotMatch(page, /toDataURL|createImageBitmap|OffscreenCanvas/);
   assert.doesNotMatch(page + layout, /SkeletonPreview|codex-preview/);
 
   assert.match(page, /PixelCursor/);

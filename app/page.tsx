@@ -45,9 +45,16 @@ type UploadItem = {
   state: "idle" | "uploading" | "queued" | "processing" | "completed" | "error";
   error?: string;
   downloadUrl?: string;
+  outputSize?: number | null;
+  savedBytes?: number;
+  savingRate?: number;
+  keptOriginal?: boolean;
 };
 
 type ConversionStatus = "idle" | "uploading" | "converting" | "completed" | "error";
+type ToolMode = "convert" | "compress";
+type CompressionPreset = "high_quality" | "balanced" | "small_file" | "custom";
+type CompressionSize = "original" | "75" | "50" | "custom";
 
 const sourceFormats = ["自动识别", "JPG", "PNG", "WebP", "AVIF", "HEIC", "SVG", "GIF", "TIFF"];
 const targetFormats = ["WebP", "JPG", "PNG", "AVIF", "GIF", "TIFF"];
@@ -64,6 +71,21 @@ const supportedImageMimeTypes = new Set([
   "image/tiff",
 ]);
 const imageInputAccept = ".jpg,.jpeg,.png,.webp,.avif,.heic,.heif,.svg,.gif,.tif,.tiff";
+const compressionImageExtensions = /\.(jpe?g|png|webp|avif|gif|tiff?)$/i;
+const compressionImageMimeTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/avif",
+  "image/gif",
+  "image/tiff",
+]);
+const compressionInputAccept = ".jpg,.jpeg,.png,.webp,.avif,.gif,.tif,.tiff";
+const compressionPresetQuality: Record<Exclude<CompressionPreset, "custom">, number> = {
+  high_quality: 90,
+  balanced: 80,
+  small_file: 65,
+};
 
 const popularConversions = [
   { from: "HEIC", to: "JPG", tone: "coral" },
@@ -101,6 +123,15 @@ const toolCategories = [
 function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function compressionSummary(item: UploadItem) {
+  if (item.keptOriginal) return " · 已足够精简，保留原文件";
+  const outputSize = item.outputSize ?? item.file.size;
+  if ((item.savedBytes ?? 0) > 0) {
+    return ` → ${formatBytes(outputSize)} · 减少 ${Math.round(item.savingRate ?? 0)}%`;
+  }
+  return ` → ${formatBytes(outputSize)} · 尺寸已调整`;
 }
 
 function imageMimeType(file: File) {
@@ -214,6 +245,7 @@ function PixelCursor() {
 
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [mode, setMode] = useState<ToolMode>("convert");
   const [sourceFormat, setSourceFormat] = useState("自动识别");
   const [targetFormat, setTargetFormat] = useState("WebP");
   const [items, setItems] = useState<UploadItem[]>([]);
@@ -225,6 +257,11 @@ export default function Home() {
   const [allFormatsOpen, setAllFormatsOpen] = useState(false);
   const [quality, setQuality] = useState(86);
   const [scale, setScale] = useState(1);
+  const [compressionPreset, setCompressionPreset] = useState<CompressionPreset>("balanced");
+  const [compressionQuality, setCompressionQuality] = useState(80);
+  const [compressionSize, setCompressionSize] = useState<CompressionSize>("original");
+  const [resizeWidth, setResizeWidth] = useState("");
+  const [resizeHeight, setResizeHeight] = useState("");
   const [toast, setToast] = useState("");
   const [celebrating, setCelebrating] = useState(false);
   const [archiveState, setArchiveState] = useState<"idle" | "creating" | "ready" | "error">("idle");
@@ -270,6 +307,10 @@ export default function Home() {
         state: "idle",
         error: undefined,
         downloadUrl: undefined,
+        outputSize: undefined,
+        savedBytes: undefined,
+        savingRate: undefined,
+        keptOriginal: undefined,
       })),
     );
     setQueuedCount(0);
@@ -289,12 +330,20 @@ export default function Home() {
       setToast("请等待当前上传完成");
       return;
     }
-    const accepted = Array.from(files).filter((file) => {
-      return supportedImageMimeTypes.has(file.type.toLowerCase()) || supportedImageExtensions.test(file.name);
+    const candidates = Array.from(files);
+    const accepted = candidates.filter((file) => {
+      const mimeType = file.type.toLowerCase();
+      return mode === "compress"
+        ? compressionImageMimeTypes.has(mimeType) || compressionImageExtensions.test(file.name)
+        : supportedImageMimeTypes.has(mimeType) || supportedImageExtensions.test(file.name);
     });
 
     if (!accepted.length) {
-      setToast("请选择图片文件");
+      setToast(
+        mode === "compress"
+          ? "压缩支持 JPG、PNG、WebP、AVIF、GIF、TIFF；HEIC 和 SVG 请使用格式转换"
+          : "请选择图片文件",
+      );
       return;
     }
 
@@ -304,7 +353,9 @@ export default function Home() {
       setToast("一次最多处理 10 个文件");
       return;
     }
-    if (accepted.length > additions.length) {
+    if (candidates.length > accepted.length) {
+      setToast("部分格式不支持原格式压缩，已跳过；HEIC 和 SVG 可使用格式转换");
+    } else if (accepted.length > additions.length) {
       setToast("一次最多处理 10 个文件，超出的文件未添加");
     }
 
@@ -352,6 +403,23 @@ export default function Home() {
     setArchiveDownloadUrl("");
   };
 
+  const changeMode = (nextMode: ToolMode) => {
+    if (nextMode === mode || status === "uploading" || status === "converting") return;
+    items.forEach((item) => {
+      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    });
+    setMode(nextMode);
+    setItems([]);
+    setQueuedCount(0);
+    setStatus("idle");
+    setArchiveState("idle");
+    setArchiveDownloadUrl("");
+    setQualityOpen(false);
+    setSizeOpen(false);
+    setAllFormatsOpen(false);
+    if (items.length) setToast("已切换功能，请重新选择图片");
+  };
+
   const pollConversion = async (itemId: string, jobId: string) => {
     let requestFailures = 0;
     while (true) {
@@ -371,13 +439,17 @@ export default function Home() {
           updateItem(itemId, {
             state: "completed",
             downloadUrl: resolveApiUrl(job.output.downloadUrl),
+            outputSize: job.output.size,
+            savedBytes: job.output.savedBytes,
+            savingRate: job.output.savingRate,
+            keptOriginal: job.output.keptOriginal,
           });
           return true;
         }
         updateItem(itemId, {
           state: "error",
           jobId: undefined,
-          error: job.errorMessage ?? "转换失败，请重试",
+          error: job.errorMessage ?? (mode === "compress" ? "压缩失败，请重试" : "转换失败，请重试"),
         });
         return false;
       } catch (error) {
@@ -386,7 +458,12 @@ export default function Home() {
         updateItem(itemId, {
           state: "error",
           jobId: undefined,
-          error: error instanceof ApiClientError ? error.message : "查询转换状态失败",
+          error:
+            error instanceof ApiClientError
+              ? error.message
+              : mode === "compress"
+                ? "查询压缩状态失败"
+                : "查询转换状态失败",
         });
         return false;
       }
@@ -401,6 +478,27 @@ export default function Home() {
 
     const pendingItems = items.filter((item) => !item.jobId);
     if (!pendingItems.length) return;
+    if (mode === "compress" && compressionSize === "custom" && !resizeWidth && !resizeHeight) {
+      setToast("请至少填写最大宽度或最大高度");
+      return;
+    }
+
+    const selectedScale =
+      mode === "convert"
+        ? scale
+        : compressionSize === "75"
+          ? 0.75
+          : compressionSize === "50"
+            ? 0.5
+            : 1;
+    const selectedWidth =
+      mode === "compress" && compressionSize === "custom" && resizeWidth
+        ? Number(resizeWidth)
+        : undefined;
+    const selectedHeight =
+      mode === "compress" && compressionSize === "custom" && resizeHeight
+        ? Number(resizeHeight)
+        : undefined;
 
     setStatus("uploading");
     const outcomes = await mapWithConcurrency(pendingItems, 3, async (item) => {
@@ -426,10 +524,18 @@ export default function Home() {
           fileName: item.file.name,
           mimeType,
           size: item.file.size,
-          sourceFormat,
-          targetFormat,
-          quality,
-          scale,
+          sourceFormat: mode === "compress" ? "自动识别" : sourceFormat,
+          targetFormat: mode === "compress" ? "original" : targetFormat,
+          quality: mode === "compress" ? compressionQuality : quality,
+          scale: selectedScale,
+          ...(mode === "compress"
+            ? {
+                operation: "compress" as const,
+                compressionPreset,
+                ...(selectedWidth ? { resizeWidth: selectedWidth } : {}),
+                ...(selectedHeight ? { resizeHeight: selectedHeight } : {}),
+              }
+            : {}),
         });
         updateItem(item.id, {
           jobId: job.id,
@@ -439,7 +545,11 @@ export default function Home() {
         return { itemId: item.id, jobId: job.id };
       } catch (error) {
         const message =
-          error instanceof ApiClientError ? error.message : "任务创建失败，请重试";
+          error instanceof ApiClientError
+            ? error.message
+            : mode === "compress"
+              ? "压缩任务创建失败，请重试"
+              : "转换任务创建失败，请重试";
         updateItem(item.id, { state: "error", error: message });
         return null;
       }
@@ -454,24 +564,24 @@ export default function Home() {
     );
     if (!queuedJobs.length) {
       setStatus("error");
-      setToast("没有任务成功进入转换队列");
+      setToast(`没有任务成功进入${mode === "compress" ? "压缩" : "转换"}队列`);
       return;
     }
     setStatus("converting");
     setToast(
       totalQueued === items.length
-        ? "文件已上传，正在转换"
-        : `${totalQueued} 个任务正在转换，其余文件可重试`,
+        ? `文件已上传，正在${mode === "compress" ? "压缩" : "转换"}`
+        : `${totalQueued} 个任务正在${mode === "compress" ? "压缩" : "转换"}，其余文件可重试`,
     );
     const completed = await Promise.all(
       queuedJobs.map((job) => pollConversion(job.itemId, job.jobId)),
     );
     if (completed.every(Boolean) && totalQueued === items.length) {
       setStatus("completed");
-      setToast("全部文件转换完成");
+      setToast(`全部文件${mode === "compress" ? "压缩" : "转换"}完成`);
     } else {
       setStatus("error");
-      setToast("部分文件转换失败，可移除失败项后继续下载");
+      setToast(`部分文件${mode === "compress" ? "压缩" : "转换"}失败，可移除失败项后继续下载`);
     }
   };
 
@@ -499,6 +609,7 @@ export default function Home() {
   };
 
   const choosePopular = (from: string, to: string) => {
+    changeMode("convert");
     setSourceFormat(from === "图片" ? "自动识别" : from);
     setTargetFormat(to === "PDF" ? "JPG" : to);
     resetQueuedState();
@@ -510,12 +621,12 @@ export default function Home() {
     status === "uploading"
       ? `正在上传 ${uploadProgress}%`
       : status === "converting"
-        ? "正在转换"
+        ? `正在${mode === "compress" ? "压缩" : "转换"}`
         : status === "completed"
-          ? "转换完成"
+          ? `${mode === "compress" ? "压缩" : "转换"}完成`
         : items.length
-          ? `转换 ${items.filter((item) => !item.jobId).length || items.length} 个文件`
-          : "开始转换";
+          ? `${mode === "compress" ? "压缩" : "转换"} ${items.filter((item) => !item.jobId).length || items.length} 个文件`
+          : `开始${mode === "compress" ? "压缩" : "转换"}`;
 
   return (
     <main className={`site-shell status-${status}`}>
@@ -539,17 +650,31 @@ export default function Home() {
         )}
         <div className="hero-inner">
           <div className="hero-copy">
-            <h1>想把图片转成什么？</h1>
-            <p className="hero-subtitle">选择格式、上传图片，剩下的交给轻转。</p>
+            <h1>{mode === "compress" ? "图片太大？轻松压一压。" : "想把图片转成什么？"}</h1>
+            <p className="hero-subtitle">
+              {mode === "compress"
+                ? "保持原格式，选择压缩强度，剩下的交给轻转。"
+                : "选择格式、上传图片，剩下的交给轻转。"}
+            </p>
             <div className="hero-links" aria-label="快捷设置">
               <button type="button" onClick={() => inputRef.current?.click()}>
-                批量转换 <ArrowRight size={15} weight="bold" />
+                批量{mode === "compress" ? "压缩" : "转换"} <ArrowRight size={15} weight="bold" />
               </button>
               <button type="button" onClick={() => setQualityOpen((open) => !open)}>
-                画质设置 <ArrowRight size={15} weight="bold" />
+                {mode === "compress" ? "高级画质" : "画质设置"} <ArrowRight size={15} weight="bold" />
               </button>
-              <button type="button" onClick={() => setSizeOpen((open) => !open)}>
-                尺寸调整 <ArrowRight size={15} weight="bold" />
+              <button
+                type="button"
+                onClick={() => {
+                  if (mode === "compress") {
+                    setCompressionSize("custom");
+                    resetQueuedState();
+                  } else {
+                    setSizeOpen((open) => !open);
+                  }
+                }}
+              >
+                {mode === "compress" ? "自定义尺寸" : "尺寸调整"} <ArrowRight size={15} weight="bold" />
               </button>
             </div>
             <div className="format-orbit" aria-hidden="true">
@@ -562,7 +687,31 @@ export default function Home() {
           </div>
 
           <div className="converter" id="converter">
-            <div className="format-row">
+            <div className="mode-switch" role="tablist" aria-label="图片处理功能">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "convert"}
+                className={mode === "convert" ? "active" : ""}
+                disabled={status === "uploading" || status === "converting"}
+                onClick={() => changeMode("convert")}
+              >
+                格式转换
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "compress"}
+                className={mode === "compress" ? "active" : ""}
+                disabled={status === "uploading" || status === "converting"}
+                onClick={() => changeMode("compress")}
+              >
+                图片压缩
+              </button>
+            </div>
+
+            {mode === "convert" ? (
+              <div className="format-row">
               <label className="select-wrap">
                 <span className="sr-only">源格式</span>
                 <select
@@ -594,7 +743,113 @@ export default function Home() {
                 </select>
                 <CaretDown size={16} weight="bold" aria-hidden="true" />
               </label>
-            </div>
+              </div>
+            ) : (
+              <div className="compression-settings">
+                <fieldset>
+                  <legend>压缩强度</legend>
+                  <div className="setting-options">
+                    {([
+                      ["high_quality", "高清"],
+                      ["balanced", "推荐"],
+                      ["small_file", "极致"],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={compressionPreset === value ? "active" : ""}
+                        onClick={() => {
+                          setCompressionPreset(value);
+                          setCompressionQuality(compressionPresetQuality[value]);
+                          resetQueuedState();
+                        }}
+                      >
+                        {label}{value === "balanced" ? " · 默认" : ""}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>图片尺寸</legend>
+                  <div className="setting-options">
+                    {([
+                      ["original", "原尺寸"],
+                      ["75", "75%"],
+                      ["50", "50%"],
+                      ["custom", "自定义"],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={compressionSize === value ? "active" : ""}
+                        onClick={() => {
+                          setCompressionSize(value);
+                          resetQueuedState();
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+                {(qualityOpen || compressionSize === "custom") && (
+                  <div className="compression-advanced">
+                    {qualityOpen && (
+                      <label>
+                        <span>编码质量 <strong>{compressionQuality}</strong></span>
+                        <input
+                          type="range"
+                          min="40"
+                          max="100"
+                          value={compressionQuality}
+                          onChange={(event) => {
+                            setCompressionQuality(Number(event.target.value));
+                            setCompressionPreset("custom");
+                            resetQueuedState();
+                          }}
+                        />
+                      </label>
+                    )}
+                    {compressionSize === "custom" && (
+                      <div className="custom-dimensions">
+                        <label>
+                          <span>最大宽度</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="40000"
+                            inputMode="numeric"
+                            placeholder="例如 1920"
+                            value={resizeWidth}
+                            onChange={(event) => {
+                              setResizeWidth(event.target.value);
+                              resetQueuedState();
+                            }}
+                          />
+                        </label>
+                        <span aria-hidden="true">×</span>
+                        <label>
+                          <span>最大高度</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="40000"
+                            inputMode="numeric"
+                            placeholder="例如 1080"
+                            value={resizeHeight}
+                            onChange={(event) => {
+                              setResizeHeight(event.target.value);
+                              resetQueuedState();
+                            }}
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <p>始终等比缩小且不会放大；默认移除 EXIF/GPS 等元数据。</p>
+              </div>
+            )}
 
             <div
               className={`drop-zone ${isDragging ? "is-dragging" : ""} ${items.length ? "has-files" : ""}`}
@@ -617,7 +872,11 @@ export default function Home() {
                     上传图片
                   </button>
                   <p>也可以拖放多个文件</p>
-                  <span>支持 JPG、PNG、WebP、AVIF、HEIC 等常见格式 · 文件仅保存 2 小时</span>
+                  <span>
+                    {mode === "compress"
+                      ? "支持 JPG、PNG、WebP、AVIF、GIF、TIFF 原格式压缩 · 文件仅保存 2 小时"
+                      : "支持 JPG、PNG、WebP、AVIF、HEIC 等常见格式 · 文件仅保存 2 小时"}
+                  </span>
                 </>
               ) : (
                 <div className="file-queue" aria-live="polite">
@@ -658,8 +917,9 @@ export default function Home() {
                             {formatBytes(item.file.size)}
                             {item.state === "uploading" && ` · 上传 ${item.progress}%`}
                             {item.state === "queued" && " · 已排队"}
-                            {item.state === "processing" && " · 转换中"}
-                            {item.state === "completed" && " · 转换完成"}
+                            {item.state === "processing" && ` · ${mode === "compress" ? "压缩" : "转换"}中`}
+                            {item.state === "completed" && mode === "convert" && " · 转换完成"}
+                            {item.state === "completed" && mode === "compress" && compressionSummary(item)}
                             {item.state === "error" && ` · ${item.error ?? "失败"}`}
                           </span>
                         </div>
@@ -693,7 +953,7 @@ export default function Home() {
               </div>
             </div>
 
-            {(qualityOpen || sizeOpen) && (
+            {mode === "convert" && (qualityOpen || sizeOpen) && (
               <div className="quick-settings">
                 {qualityOpen && (
                   <label>
@@ -729,7 +989,7 @@ export default function Home() {
               </div>
             )}
 
-            {allFormatsOpen && (
+            {mode === "convert" && allFormatsOpen && (
               <div className="all-formats" aria-label="全部图片格式">
                 {targetFormats.map((format) => (
                   <button
@@ -748,9 +1008,13 @@ export default function Home() {
             )}
 
             <div className="converter-actions">
-              <button className="all-formats-button" type="button" onClick={() => setAllFormatsOpen((open) => !open)}>
-                查看全部图片格式 <ArrowRight size={16} weight="bold" />
-              </button>
+              {mode === "convert" ? (
+                <button className="all-formats-button" type="button" onClick={() => setAllFormatsOpen((open) => !open)}>
+                  查看全部图片格式 <ArrowRight size={16} weight="bold" />
+                </button>
+              ) : (
+                <span className="compression-retention">结果与原图均仅保存 2 小时</span>
+              )}
               <button
                 className={`convert-button ${status === "completed" ? "is-done" : ""}`}
                 type="button"
@@ -802,15 +1066,19 @@ export default function Home() {
             )}
             {status === "converting" && (
               <p className="conversion-message" role="status">
-                <SpinnerGap className="spinner" size={18} weight="bold" /> {queuedCount} 个任务正在转换
+                <SpinnerGap className="spinner" size={18} weight="bold" /> {queuedCount} 个任务正在{mode === "compress" ? "压缩" : "转换"}
               </p>
             )}
             {status === "completed" && (
               <p className="conversion-message" role="status">
-                <CheckCircle size={18} weight="fill" /> {completedItems.length} 个文件转换完成，请在 2 小时内下载
+                <CheckCircle size={18} weight="fill" /> {completedItems.length} 个文件{mode === "compress" ? "压缩" : "转换"}完成，请在 2 小时内下载
               </p>
             )}
-            {status === "error" && <p className="conversion-message is-error">部分文件未成功排队，请重试失败项</p>}
+            {status === "error" && (
+              <p className="conversion-message is-error">
+                部分文件{mode === "compress" ? "压缩" : "转换"}失败，请重试失败项
+              </p>
+            )}
           </div>
         </div>
       </section>
@@ -864,7 +1132,7 @@ export default function Home() {
         </a>
       </footer>
 
-      <input ref={inputRef} className="visually-hidden-input" type="file" accept={imageInputAccept} multiple disabled={status === "uploading" || status === "converting"} onChange={handleFileChange} />
+      <input ref={inputRef} className="visually-hidden-input" type="file" accept={mode === "compress" ? compressionInputAccept : imageInputAccept} multiple disabled={status === "uploading" || status === "converting"} onChange={handleFileChange} />
       {toast && <div className="toast" role="status">{toast}</div>}
     </main>
   );

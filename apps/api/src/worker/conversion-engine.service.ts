@@ -6,8 +6,11 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  COMPRESSIBLE_FORMATS,
   TARGET_FORMATS,
   outputInfo,
+  type CompressionPreset,
+  type CompressibleFormat,
   type TargetFormat,
 } from "../conversion/formats";
 
@@ -19,7 +22,19 @@ export type ConversionResult = {
   detectedSourceFormat: string;
   mimeType: string;
   extension: string;
+  targetFormat: TargetFormat;
+  keptOriginal: boolean;
 };
+
+export class ImageProcessingError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ImageProcessingError";
+  }
+}
 
 type SharpPipeline = ReturnType<typeof sharp>;
 type SharpMetadata = Awaited<ReturnType<SharpPipeline["metadata"]>>;
@@ -73,6 +88,79 @@ export class ConversionEngineService {
       detectedSourceFormat: source.detectedSourceFormat,
       mimeType: output.mimeType,
       extension: output.extension,
+      targetFormat,
+      keptOriginal: false,
+    };
+  }
+
+  async compress(
+    input: Buffer,
+    options: {
+      preset: CompressionPreset;
+      quality: number;
+      scale: number;
+      resizeWidth?: number | null;
+      resizeHeight?: number | null;
+      maxInputPixels: number;
+      timeoutMs: number;
+    },
+  ): Promise<ConversionResult> {
+    if (this.ftypBrand(input) === "avis") {
+      throw new ImageProcessingError(
+        "ANIMATED_AVIF_NOT_SUPPORTED",
+        "暂不支持动态 AVIF 原格式压缩，请使用其他输出格式",
+      );
+    }
+    const probe = sharp(input, {
+      limitInputPixels: options.maxInputPixels,
+      failOn: "warning",
+    });
+    const metadata = await probe.metadata();
+    const detected = this.detectedFormat(metadata, input);
+    if (!COMPRESSIBLE_FORMATS.includes(detected as CompressibleFormat)) {
+      throw new ImageProcessingError(
+        "UNSUPPORTED_COMPRESSION_FORMAT",
+        "当前格式不支持原格式压缩，请使用格式转换",
+      );
+    }
+    const targetFormat = detected as CompressibleFormat;
+    if (targetFormat === "AVIF" && (metadata.pages ?? 1) > 1) {
+      throw new ImageProcessingError(
+        "ANIMATED_AVIF_NOT_SUPPORTED",
+        "暂不支持动态 AVIF 原格式压缩，请使用其他输出格式",
+      );
+    }
+    const preserveAnimation =
+      ["GIF", "WebP", "TIFF"].includes(targetFormat) && (metadata.pages ?? 1) > 1;
+    let pipeline = sharp(input, {
+      limitInputPixels: options.maxInputPixels,
+      failOn: "warning",
+      ...(preserveAnimation ? { animated: true } : { page: 0, pages: 1 }),
+    })
+      .autoOrient()
+      .toColorspace("srgb");
+    const resized = this.resizePipeline(pipeline, metadata, {
+      scale: options.scale,
+      resizeWidth: options.resizeWidth,
+      resizeHeight: options.resizeHeight,
+    });
+    pipeline = resized.pipeline;
+    pipeline.timeout({ seconds: Math.max(1, Math.ceil(options.timeoutMs / 1000)) });
+    const encoded = await this.encodeCompression(
+      pipeline,
+      targetFormat,
+      options.preset,
+      options.quality,
+    ).toBuffer();
+    const keptOriginal = !resized.applied && encoded.length >= input.length;
+    const output = outputInfo(targetFormat);
+    return {
+      data: keptOriginal ? input : encoded,
+      detectedSourceFormat: detected,
+      mimeType: output.mimeType,
+      extension: output.extension,
+      targetFormat,
+      keptOriginal,
     };
   }
 
@@ -132,6 +220,116 @@ export class ConversionEngineService {
       case "TIFF":
         return pipeline.tiff({ compression: "deflate" });
     }
+  }
+
+  private encodeCompression(
+    pipeline: SharpPipeline,
+    target: CompressibleFormat,
+    preset: CompressionPreset,
+    customQuality: number,
+  ) {
+    const quality = Math.max(40, Math.min(100, Math.round(customQuality)));
+    switch (target) {
+      case "JPG": {
+        const selected = this.presetNumber(preset, quality, 90, 82, 70);
+        return pipeline
+          .flatten({ background: "#ffffff" })
+          .jpeg({ quality: selected, mozjpeg: true, progressive: true });
+      }
+      case "WebP": {
+        const selected = this.presetNumber(preset, quality, 88, 80, 68);
+        return pipeline.webp({
+          quality: selected,
+          effort: 5,
+          smartSubsample: true,
+          minSize: true,
+          mixed: true,
+        });
+      }
+      case "AVIF": {
+        const selected =
+          preset === "custom"
+            ? Math.round(20 + quality * 0.5)
+            : this.presetNumber(preset, quality, 65, 50, 38);
+        return pipeline.avif({ quality: selected, effort: 4 });
+      }
+      case "PNG": {
+        if (preset === "high_quality" || (preset === "custom" && quality === 100)) {
+          return pipeline.png({ compressionLevel: 9, adaptiveFiltering: true });
+        }
+        const selected = this.presetNumber(preset, quality, 100, 85, 65);
+        const colours =
+          preset === "small_file"
+            ? 128
+            : Math.max(32, Math.min(256, Math.round(32 + ((selected - 40) / 60) * 224)));
+        return pipeline.png({
+          compressionLevel: 9,
+          adaptiveFiltering: true,
+          palette: true,
+          quality: selected,
+          colours,
+          effort: 7,
+          dither: 1,
+        });
+      }
+      case "GIF": {
+        const colours =
+          preset === "high_quality"
+            ? 256
+            : preset === "balanced"
+              ? 192
+              : preset === "small_file"
+                ? 96
+                : Math.max(32, Math.min(256, Math.round(32 + ((quality - 40) / 60) * 224)));
+        return pipeline.gif({ effort: 7, colours, dither: 1 });
+      }
+      case "TIFF": {
+        if (preset === "high_quality" || (preset === "custom" && quality === 100)) {
+          return pipeline.tiff({ compression: "deflate", predictor: "horizontal" });
+        }
+        const selected = this.presetNumber(preset, quality, 100, 85, 70);
+        return pipeline.tiff({ compression: "jpeg", quality: selected });
+      }
+    }
+  }
+
+  private presetNumber(
+    preset: CompressionPreset,
+    custom: number,
+    highQuality: number,
+    balanced: number,
+    smallFile: number,
+  ) {
+    if (preset === "custom") return custom;
+    if (preset === "high_quality") return highQuality;
+    if (preset === "small_file") return smallFile;
+    return balanced;
+  }
+
+  private resizePipeline(
+    pipeline: SharpPipeline,
+    metadata: SharpMetadata,
+    options: {
+      scale: number;
+      resizeWidth?: number | null;
+      resizeHeight?: number | null;
+    },
+  ) {
+    const oriented = metadata.autoOrient as { width?: number; height?: number } | undefined;
+    const width = oriented?.width ?? metadata.width;
+    const height = oriented?.height ?? metadata.pageHeight ?? metadata.height;
+    if (!width || !height) throw new Error("Unable to determine image dimensions");
+    let ratio = Math.min(1, options.scale);
+    if (options.resizeWidth || options.resizeHeight) {
+      const widthRatio = options.resizeWidth ? options.resizeWidth / width : 1;
+      const heightRatio = options.resizeHeight ? options.resizeHeight / height : 1;
+      ratio = Math.min(1, widthRatio, heightRatio);
+    }
+    if (ratio >= 1) return { pipeline, applied: false };
+    return {
+      pipeline: pipeline.resize({ width: Math.max(1, Math.round(width * ratio)) }),
+      applied: true,
+    };
   }
 
   private async encodeAnimatedAvif(input: Buffer, quality: number, timeoutMs: number) {

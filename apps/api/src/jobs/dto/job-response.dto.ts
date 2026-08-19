@@ -1,5 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { SOURCE_FORMATS, TARGET_FORMATS } from "../../conversion/formats";
+import {
+  COMPRESSION_PRESETS,
+  JOB_OPERATIONS,
+  ORIGINAL_TARGET_FORMAT,
+  SOURCE_FORMATS,
+  TARGET_FORMATS,
+} from "../../conversion/formats";
 
 export const JOB_STATUSES = [
   "queued",
@@ -35,6 +41,22 @@ export class JobOutputDto {
     type: String,
   })
   downloadUrl: string;
+
+  @ApiPropertyOptional({ description: "压缩前文件大小（字节）", example: 2048000, type: Number })
+  originalSize?: number;
+
+  @ApiPropertyOptional({ description: "压缩节省的字节数", example: 1865660, type: Number })
+  savedBytes?: number;
+
+  @ApiPropertyOptional({ description: "压缩体积减少百分比", example: 91.1, type: Number })
+  savingRate?: number;
+
+  @ApiPropertyOptional({
+    description: "重新编码无收益时是否直接保留了原文件",
+    example: false,
+    type: Boolean,
+  })
+  keptOriginal?: boolean;
 }
 
 export class JobResponseDto {
@@ -74,8 +96,31 @@ export class JobResponseDto {
   })
   detectedSourceFormat: string | null;
 
-  @ApiProperty({ description: "目标格式", enum: TARGET_FORMATS, example: "WebP" })
+  @ApiProperty({
+    description: "请求的目标格式；压缩任务为 original",
+    enum: [...TARGET_FORMATS, ORIGINAL_TARGET_FORMAT],
+    example: "WebP",
+  })
   targetFormat: string;
+
+  @ApiProperty({ description: "任务类型", enum: JOB_OPERATIONS, example: "convert" })
+  operation: (typeof JOB_OPERATIONS)[number];
+
+  @ApiPropertyOptional({
+    description: "图片压缩档位；格式转换任务为 null",
+    enum: COMPRESSION_PRESETS,
+    nullable: true,
+    example: "balanced",
+  })
+  compressionPreset?: string | null;
+
+  @ApiPropertyOptional({
+    description: "Worker 实际使用的输出格式；任务处理前可能为 null",
+    enum: TARGET_FORMATS,
+    nullable: true,
+    example: "PNG",
+  })
+  resolvedTargetFormat?: string | null;
 
   @ApiProperty({
     description: "有损格式的画质参数",
@@ -95,6 +140,12 @@ export class JobResponseDto {
   })
   scale: number;
 
+  @ApiPropertyOptional({ description: "自定义最大宽度", nullable: true, type: Number })
+  resizeWidth?: number | null;
+
+  @ApiPropertyOptional({ description: "自定义最大高度", nullable: true, type: Number })
+  resizeHeight?: number | null;
+
   @ApiProperty({
     description:
       "任务状态：queued 排队中、processing 转换中、completed 已完成、failed 失败、cancelled 已取消、expired 文件已过期",
@@ -110,6 +161,14 @@ export class JobResponseDto {
     type: String,
   })
   errorMessage: string | null;
+
+  @ApiPropertyOptional({
+    description: "异步处理失败的稳定错误码",
+    example: "UNSUPPORTED_COMPRESSION_FORMAT",
+    nullable: true,
+    type: String,
+  })
+  errorCode?: string | null;
 
   @ApiProperty({
     description: "转换结果对象标识；未完成时为 null",
@@ -134,6 +193,13 @@ export class JobResponseDto {
     type: Number,
   })
   outputByteSize: number | null;
+
+  @ApiProperty({
+    description: "重新编码无收益时是否直接保留原文件",
+    example: false,
+    type: Boolean,
+  })
+  keptOriginal: boolean;
 
   @ApiProperty({
     description: "任务创建时间（ISO 8601）",

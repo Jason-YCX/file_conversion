@@ -29,12 +29,19 @@ export type TaskOutput = {
   mimeType: string;
   size: number | null;
   downloadUrl: string;
+  originalSize?: number;
+  savedBytes?: number;
+  savingRate?: number;
+  keptOriginal?: boolean;
 };
 
 export type ConversionJob = {
   id: string;
   status: "queued" | "processing" | "completed" | "failed" | "cancelled" | "expired";
   detectedSourceFormat?: string | null;
+  resolvedTargetFormat?: string | null;
+  operation?: "convert" | "compress";
+  errorCode?: string | null;
   errorMessage?: string | null;
   output?: TaskOutput;
 };
@@ -55,6 +62,10 @@ export type CreateJobInput = {
   targetFormat: string;
   quality: number;
   scale: number;
+  operation?: "convert" | "compress";
+  compressionPreset?: "high_quality" | "balanced" | "small_file" | "custom";
+  resizeWidth?: number;
+  resizeHeight?: number;
 };
 
 export class ApiClientError extends Error {

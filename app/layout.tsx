@@ -13,8 +13,8 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const baseUrl = `${protocol}://${host}`;
-  const title = "轻转 · 在线图片格式转换工具";
-  const description = "快速完成 JPG、PNG、WebP、AVIF、HEIC 等常见图片格式转换。";
+  const title = "轻转 · 在线图片格式转换与压缩工具";
+  const description = "在线完成 JPG、PNG、WebP、AVIF 等图片格式转换、原格式压缩与批量下载。";
 
   return {
     title,
@@ -27,7 +27,7 @@ export async function generateMetadata(): Promise<Metadata> {
       type: "website",
       title,
       description,
-      images: [{ url: `${baseUrl}/og.png`, width: 1200, height: 630, alt: "轻转图片格式转换工具" }],
+      images: [{ url: `${baseUrl}/og.png`, width: 1200, height: 630, alt: "轻转图片格式转换与压缩工具" }],
     },
     twitter: {
       card: "summary_large_image",

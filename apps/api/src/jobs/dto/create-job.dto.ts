@@ -4,19 +4,36 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumber,
+  IsOptional,
   IsString,
   Max,
   MaxLength,
   Min,
 } from "class-validator";
 import {
+  COMPRESSION_PRESETS,
+  JOB_OPERATIONS,
+  ORIGINAL_TARGET_FORMAT,
   SOURCE_FORMATS,
   TARGET_FORMATS,
+  type CompressionPreset,
+  type JobOperation,
+  type RequestedTargetFormat,
   type SourceFormat,
-  type TargetFormat,
 } from "../../conversion/formats";
 
 export class CreateJobDto {
+  @ApiProperty({
+    description: "任务类型；不传时保持原有格式转换行为",
+    enum: JOB_OPERATIONS,
+    default: "convert",
+    required: false,
+    type: String,
+  })
+  @IsOptional()
+  @IsIn(JOB_OPERATIONS)
+  operation?: JobOperation;
+
   @ApiProperty({
     description: "申请上传签名接口返回的 objectKey，必须原样传入",
     example: "uploads/2026/08/17/550e8400-e29b-41d4-a716-446655440000.heic",
@@ -68,9 +85,24 @@ export class CreateJobDto {
   @IsIn(SOURCE_FORMATS)
   sourceFormat: SourceFormat;
 
-  @ApiProperty({ description: "目标格式", enum: TARGET_FORMATS, example: "WebP" })
-  @IsIn(TARGET_FORMATS)
-  targetFormat: TargetFormat;
+  @ApiProperty({
+    description: "目标格式；压缩任务必须传 original，表示保持原格式",
+    enum: [...TARGET_FORMATS, ORIGINAL_TARGET_FORMAT],
+    example: "WebP",
+  })
+  @IsIn([...TARGET_FORMATS, ORIGINAL_TARGET_FORMAT])
+  targetFormat: RequestedTargetFormat;
+
+  @ApiProperty({
+    description: "压缩档位；仅压缩任务使用",
+    enum: COMPRESSION_PRESETS,
+    example: "balanced",
+    required: false,
+    type: String,
+  })
+  @IsOptional()
+  @IsIn(COMPRESSION_PRESETS)
+  compressionPreset?: CompressionPreset;
 
   @ApiProperty({
     description: "输出画质；主要影响 JPG、WebP、AVIF 和 GIF",
@@ -95,4 +127,30 @@ export class CreateJobDto {
   @Min(0.1)
   @Max(1)
   scale: number;
+
+  @ApiProperty({
+    description: "自定义最大宽度（像素）；与最大高度共同构成等比缩放边界",
+    minimum: 1,
+    maximum: 40000,
+    required: false,
+    type: Number,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(40000)
+  resizeWidth?: number;
+
+  @ApiProperty({
+    description: "自定义最大高度（像素）；与最大宽度共同构成等比缩放边界",
+    minimum: 1,
+    maximum: 40000,
+    required: false,
+    type: Number,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(40000)
+  resizeHeight?: number;
 }

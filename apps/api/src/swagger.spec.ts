@@ -64,12 +64,16 @@ describe("Swagger 对接文档", () => {
     expect(responseDescription(presign?.responses["200"])).toBe("签名地址申请成功");
     expect(document.components?.schemas?.PresignUploadResponseDto).toBeDefined();
     expect(document.components?.schemas?.ApiErrorResponseDto).toBeDefined();
+    const createJob = document.paths["/api/v1/jobs"]?.post;
+    expect(createJob?.summary).toBe("创建图片转换或压缩任务");
+    expect(document.components?.schemas?.CreateJobDto).toBeDefined();
+    expect(document.components?.schemas?.JobOutputDto).toBeDefined();
   });
 
   it("准确描述下载接口的 302 和业务错误", () => {
     const download = document.paths["/api/v1/jobs/{id}/download"]?.get;
 
-    expect(download?.summary).toBe("下载转换结果");
+    expect(download?.summary).toBe("下载图片处理结果");
     expect(responseDescription(download?.responses["302"])).toContain("跳转");
     expect(responseDescription(download?.responses["409"])).toContain("JOB_NOT_COMPLETED");
     expect(responseDescription(download?.responses["410"])).toContain("FILE_EXPIRED");

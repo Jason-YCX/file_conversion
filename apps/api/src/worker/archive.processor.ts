@@ -50,7 +50,11 @@ export class ArchiveProcessor {
     const names = new Map<string, number>();
     for (const job of ordered) {
       if (!job?.outputObjectKey) continue;
-      const baseName = outputFileName(job.originalName, job.targetFormat as TargetFormat);
+      const baseName = outputFileName(
+        job.originalName,
+        (job.resolvedTargetFormat ?? job.targetFormat) as TargetFormat,
+        job.operation,
+      );
       const count = names.get(baseName) ?? 0;
       names.set(baseName, count + 1);
       const name = count === 0 ? baseName : this.numberedName(baseName, count + 1);

@@ -15,6 +15,7 @@ describe("conversion format contract", () => {
     for (const target of TARGET_FORMATS) {
       expect(outputInfo(target).mimeType).toMatch(/^image\//);
       expect(outputFileName("../危险 photo.png", target)).not.toContain("/");
+      expect(outputFileName("photo.png", target, "compress")).toContain("-compressed.");
     }
   });
 });

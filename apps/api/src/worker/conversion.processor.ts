@@ -1,11 +1,14 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { and, eq, ne } from "drizzle-orm";
-import { outputFileName, type TargetFormat } from "../conversion/formats";
+import { outputFileName } from "../conversion/formats";
 import { DatabaseService } from "../database/database.service";
 import { jobs } from "../database/schema";
 import { StorageService } from "../storage/storage.service";
-import { ConversionEngineService } from "./conversion-engine.service";
+import {
+  ConversionEngineService,
+  ImageProcessingError,
+} from "./conversion-engine.service";
 
 @Injectable()
 export class ConversionProcessor {
@@ -33,42 +36,89 @@ export class ConversionProcessor {
       .set({ status: "processing", errorMessage: null, updatedAt: new Date() })
       .where(and(eq(jobs.id, jobId), ne(jobs.status, "expired")));
 
-    const input = await this.storage.getObjectBuffer(job.inputObjectKey);
-    const result = await this.engine.convert(input, {
-      targetFormat: job.targetFormat,
-      quality: job.quality,
-      scale: job.scale,
-      maxInputPixels: this.maxInputPixels,
-      timeoutMs: this.timeoutMs,
-    });
-    const fileName = outputFileName(job.originalName, job.targetFormat as TargetFormat);
-    const objectKey = `converted/${job.id}/${fileName}`;
-    await this.storage.putObject(objectKey, result.data, result.mimeType);
-    await this.database.db
-      .update(jobs)
-      .set({
-        status: "completed",
-        detectedSourceFormat: result.detectedSourceFormat,
-        outputObjectKey: objectKey,
-        outputMimeType: result.mimeType,
-        outputByteSize: result.data.length,
-        errorMessage: null,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(jobs.id, jobId), ne(jobs.status, "expired")));
+    try {
+      const input = await this.storage.getObjectBuffer(job.inputObjectKey);
+      const result =
+        job.operation === "compress"
+          ? await this.engine.compress(input, {
+              preset: job.compressionPreset ?? "balanced",
+              quality: job.quality,
+              scale: job.scale,
+              resizeWidth: job.resizeWidth,
+              resizeHeight: job.resizeHeight,
+              maxInputPixels: this.maxInputPixels,
+              timeoutMs: this.timeoutMs,
+            })
+          : await this.engine.convert(input, {
+              targetFormat: job.targetFormat,
+              quality: job.quality,
+              scale: job.scale,
+              maxInputPixels: this.maxInputPixels,
+              timeoutMs: this.timeoutMs,
+            });
+      const fileName = outputFileName(job.originalName, result.targetFormat, job.operation);
+      const objectKey = `converted/${job.id}/${fileName}`;
+      await this.storage.putObject(objectKey, result.data, result.mimeType);
+      await this.database.db
+        .update(jobs)
+        .set({
+          status: "completed",
+          detectedSourceFormat: result.detectedSourceFormat,
+          resolvedTargetFormat: result.targetFormat,
+          outputObjectKey: objectKey,
+          outputMimeType: result.mimeType,
+          outputByteSize: result.data.length,
+          keptOriginal: result.keptOriginal,
+          errorCode: null,
+          errorMessage: null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(jobs.id, jobId), ne(jobs.status, "expired")));
+    } catch (error) {
+      const failure = this.failure(error, job.operation);
+      await this.database.db
+        .update(jobs)
+        .set({
+          errorCode: failure.code,
+          errorMessage: failure.message,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(jobs.id, jobId), ne(jobs.status, "expired")));
+      throw error;
+    }
   }
 
   async markRetrying(jobId: string) {
     await this.database.db
       .update(jobs)
-      .set({ status: "queued", errorMessage: "转换失败，正在自动重试", updatedAt: new Date() })
+      .set({
+        status: "queued",
+        errorCode: null,
+        errorMessage: "处理失败，正在自动重试",
+        updatedAt: new Date(),
+      })
       .where(and(eq(jobs.id, jobId), ne(jobs.status, "expired")));
   }
 
   async markFailed(jobId: string) {
     await this.database.db
       .update(jobs)
-      .set({ status: "failed", errorMessage: "文件无法转换，请检查格式或文件是否损坏", updatedAt: new Date() })
+      .set({ status: "failed", updatedAt: new Date() })
       .where(and(eq(jobs.id, jobId), ne(jobs.status, "expired")));
+  }
+
+  private failure(error: unknown, operation: "convert" | "compress") {
+    if (error instanceof ImageProcessingError) {
+      return { code: error.code, message: error.message };
+    }
+    return operation === "compress"
+      ? {
+          code: "COMPRESSION_FAILED",
+          message: "文件无法压缩，请检查格式或文件是否损坏",
+        }
+      : {
+          code: "CONVERSION_FAILED",
+          message: "文件无法转换，请检查格式或文件是否损坏",
+        };
   }
 }

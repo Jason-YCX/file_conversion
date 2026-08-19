@@ -29,6 +29,7 @@ export class FileCleanupService {
       .set({
         status: "expired",
         errorMessage: "文件已超过2小时保存期限，已自动删除",
+        errorCode: "FILE_EXPIRED",
         outputObjectKey: null,
         outputMimeType: null,
         outputByteSize: null,

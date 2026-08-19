@@ -1,0 +1,341 @@
+{
+  "id": "982e0ffc-5b1f-44ba-976d-96ad31c26242",
+  "prevId": "8b765238-6d88-44c1-b5aa-ad115c160298",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.archives": {
+      "name": "archives",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "job_ids": {
+          "name": "job_ids",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "job_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'queued'"
+        },
+        "output_object_key": {
+          "name": "output_object_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "output_byte_size": {
+          "name": "output_byte_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "archives_status_created_at_idx": {
+          "name": "archives_status_created_at_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.jobs": {
+      "name": "jobs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "input_object_key": {
+          "name": "input_object_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "original_name": {
+          "name": "original_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "byte_size": {
+          "name": "byte_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_format": {
+          "name": "source_format",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "detected_source_format": {
+          "name": "detected_source_format",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "target_format": {
+          "name": "target_format",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resolved_target_format": {
+          "name": "resolved_target_format",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "operation": {
+          "name": "operation",
+          "type": "job_operation",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'convert'"
+        },
+        "compression_preset": {
+          "name": "compression_preset",
+          "type": "compression_preset",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quality": {
+          "name": "quality",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scale": {
+          "name": "scale",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resize_width": {
+          "name": "resize_width",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resize_height": {
+          "name": "resize_height",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "job_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'queued'"
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "output_object_key": {
+          "name": "output_object_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "output_mime_type": {
+          "name": "output_mime_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "output_byte_size": {
+          "name": "output_byte_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kept_original": {
+          "name": "kept_original",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "jobs_status_created_at_idx": {
+          "name": "jobs_status_created_at_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "jobs_input_object_key_idx": {
+          "name": "jobs_input_object_key_idx",
+          "columns": [
+            {
+              "expression": "input_object_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.compression_preset": {
+      "name": "compression_preset",
+      "schema": "public",
+      "values": [
+        "high_quality",
+        "balanced",
+        "small_file",
+        "custom"
+      ]
+    },
+    "public.job_operation": {
+      "name": "job_operation",
+      "schema": "public",
+      "values": [
+        "convert",
+        "compress"
+      ]
+    },
+    "public.job_status": {
+      "name": "job_status",
+      "schema": "public",
+      "values": [
+        "queued",
+        "processing",
+        "completed",
+        "failed",
+        "cancelled",
+        "expired"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

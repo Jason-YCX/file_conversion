@@ -10,21 +10,24 @@
 - 图片拖放与多文件队列
 - 上传列表超出可视区域后支持内部滚动并完整显示每个文件状态
 - 全局操作消息统一显示在页面上方，不遮挡底部操作区域
+- 首页支持“格式转换 / 图片压缩”模式切换，压缩任务全部由后端 Worker 执行
 - 源格式识别与输出格式选择
 - MinIO/R2 兼容的浏览器直传
 - PostgreSQL 持久化任务、BullMQ 转换/打包队列和独立 Worker
 - NestJS 健康检查、签名上传、创建任务、任务查询和下载 API
-- 画质、尺寸与常用转换交互状态
+- 转换画质与尺寸设置；压缩支持高清/推荐/极致档位、高级质量和自定义最大尺寸
 - 当前顶部仅保留品牌标识，导航、搜索和登录入口待对应功能上线后再开放
 - 桌面端与移动端适配
 - JPG、PNG、WebP、AVIF、HEIC/HEIF、SVG、GIF、TIFF 输入
 - WebP、JPG、PNG、AVIF、GIF、TIFF 输出及 42 条跨格式路径
+- JPG、PNG、WebP、AVIF、GIF、TIFF 原格式压缩，输出不小于原图且未缩放时自动保留原文件
+- 压缩时保留动态 GIF/WebP 和多页 TIFF；动态 AVIF 首版明确拒绝，HEIC/SVG 引导使用格式转换
 - 动态 GIF/WebP/TIFF 转 GIF、WebP、AVIF 时保留动画
 - 单文件下载与后端流式 ZIP 批量下载
 - 原始上传、转换结果和 ZIP 仅保存2小时，由 Worker 启动时及每10分钟自动清理
 - Open Graph 分享预览图
 
-当前链路为 `上传 -> 对象存储 -> PostgreSQL任务 -> BullMQ -> 独立转换Worker -> 对象存储结果 -> 下载`。转换 Worker 与 NestJS 请求进程分开运行。
+当前链路为 `上传 -> 对象存储 -> PostgreSQL任务 -> BullMQ -> 独立图片处理Worker -> 对象存储结果 -> 下载`。格式转换和图片压缩共用队列与 Worker，并与 NestJS 请求进程分开运行。
 
 ## 本地运行
 
@@ -85,7 +88,7 @@ APP_VERSION=完整Git提交SHA SKIP_GIT_PULL=1 ./scripts/deploy.sh
 
 - `GET /api/v1/health`：检查 PostgreSQL、Redis 和对象存储
 - `POST /api/v1/uploads/presign`：生成文件直传地址
-- `POST /api/v1/jobs`：校验已上传对象并创建排队任务
+- `POST /api/v1/jobs`：校验已上传对象并创建格式转换或图片压缩任务
 - `GET /api/v1/jobs/:id`：查询持久化任务状态
 - `GET /api/v1/jobs/:id/download`：下载已完成的转换结果
 - `POST /api/v1/archives`：创建异步 ZIP 打包任务
@@ -96,7 +99,9 @@ APP_VERSION=完整Git提交SHA SKIP_GIT_PULL=1 ./scripts/deploy.sh
 
 所有对象存储文件统一保留2小时：原始上传位于 `uploads/`，转换结果位于 `converted/`，批量压缩包位于 `archives/`。清理后任务状态变为 `expired`，下载接口返回 `410 FILE_EXPIRED`；数据库任务记录继续保留用于说明过期原因。
 
-PNG/TIFF 保持无损压缩；JPG/WebP/AVIF/GIF 使用画质参数。透明图片转 JPG 时使用白色背景，输出默认纠正 EXIF 方向并移除原始元数据。HEIC 序列取主图；动态图片转 JPG、PNG、TIFF 时取首帧。
+格式转换中 PNG/TIFF 保持无损压缩，JPG/WebP/AVIF/GIF 使用画质参数。原格式压缩按格式映射高清、推荐、极致或自定义质量，可按 75%、50% 或最大宽高等比缩小且从不放大。重新编码结果默认纠正 EXIF 方向并移除原始元数据；若原尺寸压缩无收益，则直接返回原文件并保留其元数据。
+
+透明图片转 JPG 时使用白色背景。HEIC 序列取主图；格式转换时动态图片转 JPG、PNG、TIFF 取首帧，原格式压缩则保留动态 GIF/WebP 和多页 TIFF。
 
 ## 验证
 

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Res } from "@nestjs/common";
 import {
   ApiBadRequestResponse,
+  ApiBody,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiFoundResponse,
@@ -18,21 +19,22 @@ import { JobResponseDto } from "./dto/job-response.dto";
 import { JobsService } from "./jobs.service";
 import type { Response } from "express";
 
-@ApiTags("转换任务")
+@ApiTags("图片处理任务")
 @Controller("jobs")
 export class JobsController {
   constructor(private readonly jobs: JobsService) {}
 
   @Post()
   @ApiOperation({
-    summary: "创建图片转换任务",
+    summary: "创建图片转换或压缩任务",
     description:
-      "校验已直传对象的大小和类型，将任务写入 PostgreSQL 并提交到转换队列。该接口当前不提供幂等键，请勿盲目重试。",
+      "校验已直传对象的大小和类型，将格式转换或原格式压缩任务写入 PostgreSQL 并提交到图片处理队列。该接口当前不提供幂等键，请勿盲目重试。",
   })
-  @ApiCreatedResponse({ description: "转换任务创建成功并进入队列", type: JobResponseDto })
+  @ApiBody({ type: CreateJobDto })
+  @ApiCreatedResponse({ description: "图片处理任务创建成功并进入队列", type: JobResponseDto })
   @ApiBadRequestResponse({
     description:
-      "参数错误、上传对象不存在或对象信息不一致（STORAGE_OBJECT_NOT_FOUND / STORAGE_OBJECT_SIZE_MISMATCH / STORAGE_OBJECT_TYPE_MISMATCH）",
+      "参数、任务类型、压缩档位、尺寸设置错误，或上传对象不存在/信息不一致（VALIDATION_ERROR / INVALID_TARGET_FORMAT / INVALID_JOB_OPTIONS / COMPRESSION_PRESET_REQUIRED / UNSUPPORTED_COMPRESSION_FORMAT / INVALID_RESIZE_OPTIONS / STORAGE_OBJECT_NOT_FOUND / STORAGE_OBJECT_SIZE_MISMATCH / STORAGE_OBJECT_TYPE_MISMATCH）",
     type: ApiErrorResponseDto,
   })
   @ApiServiceUnavailableResponse({
@@ -45,7 +47,7 @@ export class JobsController {
 
   @Get(":id")
   @ApiOperation({
-    summary: "查询转换任务",
+    summary: "查询图片处理任务",
     description: "查询持久化任务状态；仅 completed 状态包含 output 下载信息。",
   })
   @ApiParam({ name: "id", description: "转换任务 ID", format: "uuid" })
@@ -58,7 +60,7 @@ export class JobsController {
 
   @Get(":id/download")
   @ApiOperation({
-    summary: "下载转换结果",
+    summary: "下载图片处理结果",
     description:
       "completed 状态下返回 302，并跳转到临时签名下载地址。服务端调用方应允许跟随重定向。",
   })

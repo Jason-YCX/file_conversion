@@ -11,13 +11,13 @@
 - 前端采用复古像素宇宙视觉，动效直接映射现有上传和转换状态，触屏及减少动态效果模式自动降级。
 - 桌面精细指针环境隐藏系统原生光标，像素点与外圈特效按指针坐标零延迟同步；触屏、粗指针及减少动态效果模式保留原生行为。
 - 品牌使用双文件轨道转换像素 Logo；横版透明图用于页头和页脚，独立透明图标用于 favicon 与移动端图标。
-- 当前只开放图片转换功能，页头和页脚仅保留品牌标识，页脚深色背景上的 Logo 使用浅色高对比底板；导航、搜索、登录入口及页脚文案链接均隐藏。
+- 当前开放图片格式转换和图片压缩，首页上传区通过模式切换共用任务链路；页头和页脚仅保留品牌标识，页脚深色背景上的 Logo 使用浅色高对比底板，导航、搜索、登录入口及页脚文案链接均隐藏。
 - 已补齐单服务器生产部署：宿主机Nginx统一承载现有网站和轻转的公网入口，Web、API、Worker、PostgreSQL、Redis和MinIO由独立生产Compose编排。
 - 生产HTTPS使用三套腾讯云手动证书；部署前校验证书，替换后通过宿主机Nginx热重载生效。
 - 生产镜像由GitHub Actions构建并以完整Git SHA推送到腾讯云TCR；服务器只拉取镜像，不执行 `npm ci` 或前后端编译。
 - GitHub Actions以服务器 `.deploy/current` 为差异基线，只构建输入发生变化的Web或Backend镜像；未变化镜像在TCR复用旧镜像并补充本次SHA标签，基线或旧标签不可用时自动回退构建，外部构建变量变化时使用 `force_rebuild`。
 - 2核4G服务器的生产转换与归档并发默认均为1；部署后只保留当前和上一版应用镜像，回滚缺失镜像时从TCR重新拉取。
-- 当前链路是 `上传 -> 对象存储 -> 数据库任务 -> conversion 队列 -> 转换 Worker -> 结果存储 -> 下载`。
+- 当前链路是 `上传 -> 对象存储 -> 数据库任务 -> conversion 队列 -> 图片处理 Worker -> 结果存储 -> 下载`；正式压缩全部在后端完成，不在浏览器生成输出文件。
 - 转换状态包含 `queued / processing / completed / failed / cancelled / expired`，只有 `completed` 才能下载。
 - 后端 Swagger 已补齐中文接口注释、请求响应模型和错误说明；其他服务的完整调用流程、示例和错误码统一维护在 `docs/api-integration.md`。
 
@@ -40,6 +40,8 @@
 - 修改对外接口契约时同步 `docs/api-integration.md`，确保服务间对接文档与实际代码一致。
 - 图片转换输入覆盖 JPG、PNG、WebP、AVIF、HEIC/HEIF、SVG、GIF、TIFF，输出覆盖 WebP、JPG、PNG、AVIF、GIF、TIFF，共 42 条跨格式路径；BMP 不在支持范围内。
 - 动态 GIF/WebP/TIFF 仅在输出 GIF/WebP/AVIF 时保留动画；转 JPG/PNG/TIFF 时取首帧。
+- 原格式压缩支持 JPG、PNG、WebP、AVIF、GIF、TIFF；保留动态 GIF/WebP 和多页 TIFF，动态 AVIF 明确失败，HEIC/SVG 需使用格式转换。
+- 压缩档位按格式映射编码参数；重新编码无收益且未实际缩放时返回原文件，用户要求缩放时尺寸要求优先。重新编码默认移除元数据，原文件回退保留元数据。
 - 批量下载由后端 `archive` 队列流式生成 ZIP，不在浏览器内压缩大文件。
 - `uploads/`、`converted/`、`archives/` 下的文件统一只保留2小时；Worker 启动时及每10分钟清理，过期任务标记为 `expired`。
 - 基础设施连接异常时，先启动Compose，再检查 `/api/v1/health`，不要直接改业务代码规避。

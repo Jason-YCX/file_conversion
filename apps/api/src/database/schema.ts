@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   pgEnum,
@@ -18,6 +19,14 @@ export const jobStatus = pgEnum("job_status", [
   "expired",
 ]);
 
+export const jobOperation = pgEnum("job_operation", ["convert", "compress"]);
+export const compressionPreset = pgEnum("compression_preset", [
+  "high_quality",
+  "balanced",
+  "small_file",
+  "custom",
+]);
+
 export const jobs = pgTable(
   "jobs",
   {
@@ -29,13 +38,20 @@ export const jobs = pgTable(
     sourceFormat: text("source_format").notNull(),
     detectedSourceFormat: text("detected_source_format"),
     targetFormat: text("target_format").notNull(),
+    resolvedTargetFormat: text("resolved_target_format"),
+    operation: jobOperation("operation").notNull().default("convert"),
+    compressionPreset: compressionPreset("compression_preset"),
     quality: integer("quality").notNull(),
     scale: real("scale").notNull(),
+    resizeWidth: integer("resize_width"),
+    resizeHeight: integer("resize_height"),
     status: jobStatus("status").notNull().default("queued"),
+    errorCode: text("error_code"),
     errorMessage: text("error_message"),
     outputObjectKey: text("output_object_key"),
     outputMimeType: text("output_mime_type"),
     outputByteSize: integer("output_byte_size"),
+    keptOriginal: boolean("kept_original").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
